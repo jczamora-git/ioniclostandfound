@@ -1,482 +1,636 @@
 <template>
   <ion-page>
-    <ion-header class="app-header">
-      <ion-toolbar>
-        <div class="header-inner">
-          <div class="brand-mark" aria-hidden="true">
-            <ion-icon :icon="searchIcon" />
-          </div>
-          <div>
-            <ion-title>Lost &amp; Found</ion-title>
-            <p>Keep track of lost and found items</p>
-          </div>
-        </div>
-      </ion-toolbar>
-    </ion-header>
+    <ion-content :fullscreen="true" class="feed-content">
+      <!-- Native iOS Pull-To-Refresh -->
+      <ion-refresher slot="fixed" @ion-refresh="handleRefresh">
+        <ion-refresher-content pulling-icon="arrow-down" refreshing-spinner="crescent" />
+      </ion-refresher>
 
-    <ion-content class="dashboard-content">
-      <main class="dashboard-shell">
-        <section class="welcome-row" aria-labelledby="dashboard-heading">
-          <div>
-            <p class="eyebrow">Dashboard</p>
-            <h1 id="dashboard-heading">Find what matters.</h1>
-            <p class="intro-copy">
-              Record, organize, and reunite belongings with their owners.
-            </p>
+      <div class="ios-screen-container modern-container">
+        <!-- Minimal Social Header with Expandable Search -->
+        <header class="home-top-bar">
+          <div v-if="!isSearchActive" class="brand-bar-row">
+            <h1 class="home-brand-title">Lost &amp; Found</h1>
+            <button
+              type="button"
+              class="search-toggle-btn"
+              aria-label="Search lost and found posts"
+              @click="openSearch"
+            >
+              <Search :size="22" />
+            </button>
           </div>
-          <div class="date-pill">
-            <ion-icon :icon="calendarIcon" aria-hidden="true" /><span>{{
-              todayLabel
-            }}</span>
+
+          <!-- Expanded Search Row -->
+          <div v-else class="expanded-search-bar">
+            <Search :size="18" class="search-leading-icon" aria-hidden="true" />
+            <input
+              ref="searchInputRef"
+              v-model="searchQuery"
+              type="search"
+              class="search-input"
+              placeholder="Search lost &amp; found posts..."
+              autocomplete="off"
+            />
+            <button
+              type="button"
+              class="close-search-btn"
+              aria-label="Close search"
+              @click="closeSearch"
+            >
+              <X :size="18" />
+            </button>
+          </div>
+        </header>
+
+        <!-- Social Category Filter Pills -->
+        <section class="categories-section" aria-label="Filter posts">
+          <div class="compact-filter-row" role="tablist">
+            <button
+              v-for="tab in filterTabs"
+              :key="tab.value"
+              type="button"
+              role="tab"
+              class="compact-filter-pill"
+              :class="{ active: activeFilter === tab.value }"
+              :aria-selected="activeFilter === tab.value"
+              @click="activeFilter = tab.value"
+            >
+              <component :is="tab.icon" :size="15" class="pill-icon" />
+              <span>{{ tab.label }}</span>
+            </button>
           </div>
         </section>
 
-        <SummaryCards :summaries="summaryCards" />
+        <!-- Feed Section Heading -->
+        <div class="feed-section-header">
+          <div class="feed-title-block">
+            <h2 class="feed-title">
+              {{ activeFilter === 'All' ? 'Recent Posts' : `${activeFilter} Posts` }}
+            </h2>
+            <span class="feed-pill-badge">
+              {{ filteredPosts.length }}
+            </span>
+          </div>
+        </div>
 
-        <div v-if="errorMessage" class="error-banner" role="alert">
-          <ion-icon :icon="warningIcon" aria-hidden="true" /><span>{{
-            errorMessage
-          }}</span
-          ><ion-button fill="clear" size="small" @click="loadItems"
-            >Try again</ion-button
+        <!-- Skeleton Loading State -->
+        <div v-if="postsLoading" class="feed-list">
+          <PostCardSkeleton :count="3" />
+        </div>
+
+        <!-- Error State -->
+        <div v-else-if="postsError" class="feed-error-box">
+          <AlertCircle :size="32" class="error-icon" />
+          <p class="error-title">Couldn't load feed</p>
+          <p class="error-sub">{{ postsError }}</p>
+          <button type="button" class="retry-btn" @click="subscribeToPosts">
+            Retry
+          </button>
+        </div>
+
+        <!-- Empty State: Search Results -->
+        <div
+          v-else-if="filteredPosts.length === 0 && searchQuery.trim()"
+          class="feed-empty-state"
+        >
+          <div class="empty-icon-wrap">
+            <Search :size="28" />
+          </div>
+          <h3 class="empty-title">No posts found</h3>
+          <p class="empty-sub">
+            No items matching "{{ searchQuery }}". Try checking your spelling or another filter.
+          </p>
+          <button type="button" class="empty-action-btn" @click="searchQuery = ''">
+            Clear Search
+          </button>
+        </div>
+
+        <!-- Empty State: Clean Feed (No logo on Home) -->
+        <div
+          v-else-if="filteredPosts.length === 0"
+          class="feed-empty-state"
+        >
+          <Inbox :size="40" class="empty-feed-icon" />
+          <h3 class="empty-title">No posts yet</h3>
+          <p class="empty-sub">Start the community by posting a lost or found item.</p>
+          <button
+            type="button"
+            class="empty-action-btn primary"
+            @click="openCreateComposer"
           >
+            Create Post
+          </button>
         </div>
 
-        <section class="workspace-grid">
-          <ItemForm
-            :form="form"
-            :errors="errors"
-            :editing-id="editingId"
-            :saving="saving"
-            @submit="saveItem"
-            @reset="resetForm"
-            @clear-error="clearError"
-            @update-form="Object.assign(form, $event)"
+        <!-- Posts Timeline Feed -->
+        <div v-else class="feed-list">
+          <PostCard
+            v-for="post in filteredPosts"
+            :key="post.id"
+            :post="post"
+            :is-helpful="isHelpfulByMe(post.id)"
+            @toggle-helpful="handleToggleHelpful"
+            @share="handleSharePost"
           />
-          <ItemList
-            :filtered-items="filteredItems"
-            :loading="loading"
-            :search-query="searchQuery"
-            :active-filter="activeFilter"
-            :format-date="formatDate"
-            @search-change="searchQuery = $event"
-            @filter-change="activeFilter = $event"
-            @edit="startEdit"
-            @delete="deleteItem"
-            @toggle-status="toggleStatus"
-          />
-        </section>
-      </main>
+        </div>
+
+        <!-- Bottom Spacing for Floating Dock -->
+        <div class="dock-spacer"></div>
+      </div>
     </ion-content>
+
+    <!-- Create Post Modal when triggered from empty state -->
+    <PostComposerModal
+      :is-open="showComposer"
+      initial-type="lost"
+      @close="showComposer = false"
+      @submit="handleDirectCreate"
+    />
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
-import { alertController, toastController } from "@ionic/vue";
-import { calendarOutline, searchOutline, warningOutline } from "ionicons/icons";
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import {
-  IonButton,
   IonContent,
-  IonHeader,
-  IonIcon,
   IonPage,
-  IonToolbar,
-  IonTitle,
+  IonRefresher,
+  IonRefresherContent,
+  toastController
 } from "@ionic/vue";
 import {
-  get,
-  onValue,
-  push,
-  ref as databaseRef,
-  remove,
-  update,
-} from "firebase/database";
-import ItemForm from "../components/ItemForm.vue";
-import ItemList from "../components/ItemList.vue";
-import SummaryCards from "../components/SummaryCards.vue";
-import { db } from "../firebase";
-import type {
-  FieldName,
-  Filter,
-  FormErrors,
-  ItemStatus,
-  ItemType,
-  LostFoundForm,
-  LostFoundItem,
-} from "../types/lostFound";
+  LayoutGrid,
+  CircleHelp,
+  SearchCheck,
+  BadgeCheck,
+  Search,
+  X,
+  AlertCircle,
+  Inbox
+} from "lucide-vue-next";
+import PostCard from "../components/PostCard.vue";
+import PostCardSkeleton from "../components/PostCardSkeleton.vue";
+import PostComposerModal from "../components/PostComposerModal.vue";
+import { usePosts } from "../composables/usePosts";
+import type { Post, PostFilter, PostFormData } from "../types/post";
 
-const searchIcon = searchOutline;
-const calendarIcon = calendarOutline;
-const warningIcon = warningOutline;
-const form = reactive<LostFoundForm>({
-  itemName: "",
-  description: "",
-  location: "",
-  date: "",
-  type: "Lost",
-  status: "Unclaimed",
-});
-const items = ref<LostFoundItem[]>([]);
+const router = useRouter();
+const {
+  postsLoading,
+  postsError,
+  subscribeToPosts,
+  getFilteredPosts,
+  toggleHelpful,
+  isHelpfulByMe,
+  createPost
+} = usePosts();
+
 const searchQuery = ref("");
-const activeFilter = ref<Filter>("All");
-const editingId = ref<string | null>(null);
-const loading = ref(true);
-const saving = ref(false);
-const errorMessage = ref("");
-const errors = reactive<FormErrors>({});
-let unsubscribe: (() => void) | undefined;
-const todayLabel = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-}).format(new Date());
+const activeFilter = ref<PostFilter>("All");
+const isSearchActive = ref(false);
+const searchInputRef = ref<HTMLInputElement | null>(null);
 
-const summaryCards = computed(() => [
-  {
-    label: "Total items",
-    value: items.value.length,
-    icon: searchIcon,
-    tone: "blue",
-  },
-  {
-    label: "Lost items",
-    value: items.value.filter((item) => item.type === "Lost").length,
-    icon: searchIcon,
-    tone: "red",
-  },
-  {
-    label: "Found items",
-    value: items.value.filter((item) => item.type === "Found").length,
-    icon: calendarIcon,
-    tone: "green",
-  },
-  {
-    label: "Unclaimed",
-    value: items.value.filter((item) => item.status === "Unclaimed").length,
-    icon: warningIcon,
-    tone: "orange",
-  },
-  {
-    label: "Claimed",
-    value: items.value.filter((item) => item.status === "Claimed").length,
-    icon: calendarIcon,
-    tone: "teal",
-  },
-]);
-const filteredItems = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase();
-  return items.value.filter((item) => {
-    const matchesFilter =
-      activeFilter.value === "All" ||
-      item.type === activeFilter.value ||
-      item.status === activeFilter.value;
-    const matchesSearch =
-      !query ||
-      [item.itemName, item.description, item.location].some((value) =>
-        value.toLowerCase().includes(query),
-      );
-    return matchesFilter && matchesSearch;
-  });
-});
-const showToast = async (
-  message: string,
-  color: "success" | "danger" = "success",
-) => {
-  const toast = await toastController.create({
-    message,
-    duration: 2600,
-    position: "bottom",
-    color,
-  });
-  await toast.present();
+const openSearch = () => {
+  isSearchActive.value = true;
+  setTimeout(() => {
+    searchInputRef.value?.focus();
+  }, 60);
 };
-const loadItems = async () => {
-  loading.value = true;
-  try {
-    const snapshot = await get(databaseRef(db, "lost_found"));
-    items.value = snapshot.exists()
-      ? Object.entries(snapshot.val()).map(([id, item]) => ({
-          id,
-          ...(item as Omit<LostFoundItem, "id">),
-        }))
-      : [];
-    errorMessage.value = "";
-  } catch (error) {
-    console.error("Failed to load items:", error);
-    errorMessage.value = "We could not load your items. Please try again.";
-  } finally {
-    loading.value = false;
-  }
+
+const closeSearch = () => {
+  searchQuery.value = "";
+  isSearchActive.value = false;
 };
-const clearError = (field: FieldName) => {
-  delete errors[field];
-};
-const validateForm = () => {
-  const fields: Array<[FieldName, string, string]> = [
-    ["itemName", form.itemName, "Item name is required."],
-    ["description", form.description, "Description is required."],
-    ["location", form.location, "Location is required."],
-    ["date", form.date, "Date is required."],
-    ["type", form.type, "Type is required."],
-    ["status", form.status, "Status is required."],
-  ];
-  fields.forEach(([field, value, message]) => {
-    if (!value.trim()) errors[field] = message;
-  });
-  return Object.keys(errors).length === 0;
-};
-const resetForm = () => {
-  Object.assign(form, {
-    itemName: "",
-    description: "",
-    location: "",
-    date: "",
-    type: "Lost" as ItemType,
-    status: "Unclaimed" as ItemStatus,
-  });
-  editingId.value = null;
-  Object.keys(errors).forEach((field) => delete errors[field as FieldName]);
-};
-const saveItem = async () => {
-  if (!validateForm()) return;
-  saving.value = true;
-  const editing = Boolean(editingId.value);
-  const item = {
-    itemName: form.itemName.trim(),
-    description: form.description.trim(),
-    location: form.location.trim(),
-    date: form.date,
-    type: form.type,
-    status: form.status,
-  };
-  try {
-    if (editingId.value)
-      await update(databaseRef(db, `lost_found/${editingId.value}`), item);
-    else await push(databaseRef(db, "lost_found"), item);
-    resetForm();
-    await showToast(
-      editing ? "Item updated successfully!" : "Item added successfully!",
-    );
-  } catch (error) {
-    console.error("Failed to save item:", error);
-    await showToast("We could not save this item. Please try again.", "danger");
-  } finally {
-    saving.value = false;
-  }
-};
-const startEdit = (item: LostFoundItem) => {
-  Object.assign(form, item);
-  editingId.value = item.id;
-  window.scrollTo({ top: 0, behavior: "smooth" });
-};
-const deleteItem = async (id: string) => {
-  const alert = await alertController.create({
-    header: "Delete item?",
-    message: "This record will be permanently removed.",
-    buttons: [
-      { text: "Cancel", role: "cancel" },
-      {
-        text: "Delete",
-        role: "destructive",
-        handler: async () => {
-          try {
-            await remove(databaseRef(db, `lost_found/${id}`));
-            await showToast("Item deleted.");
-          } catch (error) {
-            console.error("Failed to delete item:", error);
-            await showToast("We could not delete this item.", "danger");
-          }
-        },
-      },
-    ],
-  });
-  await alert.present();
-};
-const toggleStatus = async (item: LostFoundItem) => {
-  try {
-    const nextStatus: ItemStatus =
-      item.status === "Claimed" ? "Unclaimed" : "Claimed";
-    await update(databaseRef(db, `lost_found/${item.id}`), {
-      status: nextStatus,
-    });
-    await showToast(
-      nextStatus === "Claimed"
-        ? "Item marked claimed."
-        : "Item marked unclaimed.",
-    );
-  } catch (error) {
-    console.error("Failed to update status:", error);
-    await showToast("We could not update the status.", "danger");
-  }
-};
-const formatDate = (value: string) => {
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : new Intl.DateTimeFormat("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      }).format(parsed);
-};
+
+interface FilterTabItem {
+  value: PostFilter;
+  label: string;
+  icon: any;
+}
+
+const filterTabs: FilterTabItem[] = [
+  { value: "All", label: "All", icon: LayoutGrid },
+  { value: "Lost", label: "Lost", icon: CircleHelp },
+  { value: "Found", label: "Found", icon: SearchCheck },
+  { value: "Resolved", label: "Resolved", icon: BadgeCheck }
+];
+
+const showComposer = ref(false);
+
 onMounted(() => {
-  unsubscribe = onValue(
-    databaseRef(db, "lost_found"),
-    (snapshot) => {
-      items.value = snapshot.exists()
-        ? Object.entries(snapshot.val()).map(([id, item]) => ({
-            id,
-            ...(item as Omit<LostFoundItem, "id">),
-          }))
-        : [];
-      loading.value = false;
-      errorMessage.value = "";
-    },
-    (error) => {
-      console.error("Failed to listen for items:", error);
-      loading.value = false;
-      errorMessage.value = "We could not load your items. Please try again.";
-    },
-  );
+  subscribeToPosts();
 });
-onUnmounted(() => unsubscribe?.());
+
+const filteredPosts = computed(() => {
+  return getFilteredPosts(activeFilter.value, searchQuery.value);
+});
+
+const handleRefresh = async (event: CustomEvent) => {
+  subscribeToPosts();
+  setTimeout(() => {
+    event.detail.complete();
+  }, 600);
+};
+
+const handleToggleHelpful = async (postId: string) => {
+  await toggleHelpful(postId);
+};
+
+const handleSharePost = async (post: Post) => {
+  const shareData = {
+    title: `${post.type.toUpperCase()}: ${post.title}`,
+    text: `${post.title} — ${post.location}. Found/Lost on ${post.eventDate}. Check Lost & Found forum.`,
+    url: window.location.origin + `/post/${post.id}`
+  };
+
+  if (navigator.share) {
+    try {
+      await navigator.share(shareData);
+      return;
+    } catch (e: any) {
+      if (e.name === "AbortError") return;
+    }
+  }
+
+  // Fallback: copy to clipboard
+  try {
+    await navigator.clipboard.writeText(
+      `${shareData.title}\n${shareData.text}\n${shareData.url}`
+    );
+    const toast = await toastController.create({
+      message: "Post link copied to clipboard!",
+      duration: 2000,
+      position: "top",
+      color: "success"
+    });
+    await toast.present();
+  } catch {
+    const toast = await toastController.create({
+      message: "Could not share at this time.",
+      duration: 2000,
+      position: "top",
+      color: "warning"
+    });
+    await toast.present();
+  }
+};
+
+const openCreateComposer = () => {
+  showComposer.value = true;
+};
+
+const handleDirectCreate = async (data: PostFormData) => {
+  try {
+    await createPost(data);
+    showComposer.value = false;
+    const toast = await toastController.create({
+      message: "Post created successfully!",
+      duration: 2500,
+      position: "top",
+      color: "success"
+    });
+    await toast.present();
+  } catch (err: any) {
+    const toast = await toastController.create({
+      message: err.message || "Failed to create post.",
+      duration: 3000,
+      position: "top",
+      color: "danger"
+    });
+    await toast.present();
+  }
+};
 </script>
 
 <style scoped>
-:global(body) {
-  background: #10151d;
+.feed-content {
+  --background: var(--app-bg);
 }
-.dashboard-content {
-  --background: #10151d;
+
+.modern-container {
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 100px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: var(--max-content-width, 600px);
+  margin: 0 auto;
 }
-.app-header ion-toolbar {
-  --background: #151c26;
-  --border-color: rgba(148, 163, 184, 0.14);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-}
-.header-inner {
+
+/* Minimal Social Top Bar */
+.home-top-bar {
+  width: 100%;
+  min-height: 56px;
   display: flex;
   align-items: center;
-  gap: 11px;
-  max-width: 1240px;
-  margin: auto;
-  padding: 12px 24px;
+  border-bottom: 1px solid var(--app-card-border);
+  padding-bottom: 8px;
 }
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  color: #9cc8ff;
-  background: rgba(64, 137, 224, 0.16);
-}
-.brand-mark ion-icon {
-  font-size: 21px;
-}
-.header-inner ion-title {
-  padding: 0;
-  color: #f4f7fb;
-  font-size: 17px;
-  font-weight: 700;
-}
-.header-inner p {
-  margin: 2px 0 0;
-  color: #8c9bad;
-  font-size: 11px;
-}
-.dashboard-shell {
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 36px 24px 60px;
-}
-.welcome-row {
+
+.brand-bar-row {
+  width: 100%;
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
 }
-.eyebrow {
-  margin: 0 0 8px;
-  color: #78b7ff;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.welcome-row h1 {
+
+.home-brand-title {
   margin: 0;
-  color: #f7f9fc;
-  font-size: clamp(29px, 4vw, 43px);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--app-text-primary);
+  line-height: 1.2;
 }
-.intro-copy {
-  margin: 9px 0 0;
-  color: #93a0b0;
-  font-size: 14px;
+
+.search-toggle-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--app-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  cursor: pointer;
+  padding: 0;
+  transition: opacity 0.15s ease;
 }
-.date-pill {
+
+.search-toggle-btn:active {
+  opacity: 0.7;
+}
+
+/* Expanded Search Input Bar */
+.expanded-search-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--app-surface);
+  border-radius: 14px;
+  height: 46px;
+  padding: 0 12px 0 14px;
+  border: 1px solid var(--app-card-border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+  transition: border-color 0.2s ease;
+}
+
+.expanded-search-bar:focus-within {
+  border-color: var(--app-primary);
+}
+
+.search-leading-icon {
+  color: var(--app-text-tertiary);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  font-size: 15px;
+  color: var(--app-text-primary);
+  outline: none;
+  font-family: inherit;
+  padding: 0;
+}
+
+.search-input::placeholder {
+  color: var(--app-text-tertiary);
+}
+
+.close-search-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--app-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.close-search-btn:active {
+  background: var(--app-surface-secondary);
+}
+
+/* Categories / Social Filter Pills */
+.categories-section {
+  width: 100%;
+}
+
+.compact-filter-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 9px;
-  color: #aebaca;
-  font-size: 12px;
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.date-pill ion-icon {
-  color: #78b7ff;
+
+.compact-filter-row::-webkit-scrollbar {
+  display: none;
 }
-.workspace-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.78fr) minmax(0, 1.22fr);
-  align-items: start;
-  gap: 26px;
+
+.compact-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-secondary);
+  background: var(--app-surface);
+  border: 1px solid var(--app-card-border);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: all 0.15s ease;
 }
-.error-banner {
+
+.compact-filter-pill:active {
+  transform: scale(0.96);
+}
+
+.compact-filter-pill.active {
+  background: var(--app-primary-soft, #DDF3FF);
+  color: var(--app-primary, #2F9FE8);
+  border-color: rgba(47, 159, 232, 0.35);
+  font-weight: 600;
+}
+
+.pill-icon {
+  flex-shrink: 0;
+}
+
+/* Section Header: Recent Posts */
+.feed-section-header {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-bottom: 20px;
-  padding: 10px 12px;
-  border: 1px solid rgba(238, 118, 109, 0.4);
-  border-radius: 8px;
-  color: #ffb1a9;
-  background: rgba(160, 48, 48, 0.12);
-  font-size: 12px;
+  justify-content: space-between;
+  padding: 0 2px;
+  margin-top: 4px;
 }
-.error-banner span {
-  flex: 1;
+
+.feed-title-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.error-banner ion-button {
-  --color: #ffc0b8;
+
+.feed-title {
   margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--app-text-primary);
 }
-@media (max-width: 980px) {
-  .workspace-grid {
-    grid-template-columns: 1fr;
-  }
+
+.feed-pill-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-primary);
+  background: var(--app-primary-soft);
+  padding: 2px 8px;
+  border-radius: 12px;
 }
-@media (max-width: 600px) {
-  .header-inner,
-  .dashboard-shell {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-  .dashboard-shell {
-    padding-top: 25px;
-  }
-  .welcome-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .date-pill {
-    align-self: flex-start;
-  }
-  .error-banner {
-    align-items: flex-start;
-  }
+
+/* Timeline Feed */
+.feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Empty State */
+.feed-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 48px 24px;
+  background: var(--app-surface);
+  border-radius: 22px;
+  border: 1px solid var(--app-card-border);
+  box-shadow: var(--app-card-shadow);
+  gap: 8px;
+}
+
+.empty-brand-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  margin-bottom: 8px;
+}
+
+.empty-icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  background: var(--app-surface-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+  color: var(--app-text-secondary);
+}
+
+.empty-icon-wrap ion-icon {
+  font-size: 28px;
+  color: var(--app-text-secondary);
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.empty-sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--app-text-secondary);
+  max-width: 280px;
+  line-height: 1.4;
+}
+
+.empty-action-btn {
+  margin-top: 10px;
+  background: var(--app-surface-secondary);
+  border: 1px solid var(--app-separator);
+  color: var(--app-text-primary);
+  border-radius: 12px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.empty-action-btn:active {
+  transform: scale(0.96);
+}
+
+.empty-action-btn.primary {
+  background: var(--app-primary);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 4px 14px rgba(47, 159, 232, 0.3);
+}
+
+/* Error Box */
+.feed-error-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 30px;
+  background: var(--app-surface);
+  border-radius: 20px;
+  border: 1px solid var(--app-card-border);
+  text-align: center;
+  gap: 6px;
+}
+
+.error-icon {
+  font-size: 32px;
+  color: var(--ion-color-danger);
+}
+
+.error-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.error-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-secondary);
+}
+
+.retry-btn {
+  margin-top: 10px;
+  background: var(--app-primary);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dock-spacer {
+  height: 70px;
 }
 </style>

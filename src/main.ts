@@ -27,12 +27,16 @@ import '@ionic/vue/css/display.css';
  * https://ionicframework.com/docs/theming/dark-mode
  */
 
-/* @import '@ionic/vue/css/palettes/dark.always.css'; */
-/* @import '@ionic/vue/css/palettes/dark.class.css'; */
-import '@ionic/vue/css/palettes/dark.system.css';
+/* Ionic Dark Mode (Controlled via .ion-palette-dark class) */
+import '@ionic/vue/css/palettes/dark.class.css';
 
 /* Theme variables */
 import './theme/variables.css';
+
+import { useTheme } from './composables/useTheme';
+
+// Initialize theme immediately to prevent flashing
+useTheme().initTheme();
 
 const app = createApp(App)
   .use(IonicVue)

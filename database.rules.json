@@ -1,0 +1,48 @@
+{
+  "rules": {
+    "profiles": {
+      ".read": true,
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "usernames": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "lost_found": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "posts": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "comments": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "helpful": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "conversations": {
+      "$conversationId": {
+        ".read": "auth != null && (data.child('participantIds/0').val() === auth.uid || data.child('participantIds/1').val() === auth.uid)",
+        ".write": "auth != null"
+      }
+    },
+    "userConversations": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null"
+      }
+    },
+    "messages": {
+      "$conversationId": {
+        ".read": "auth != null && (root.child('conversations/' + $conversationId + '/participantIds/0').val() === auth.uid || root.child('conversations/' + $conversationId + '/participantIds/1').val() === auth.uid)",
+        ".write": "auth != null"
+      }
+    }
+  }
+}

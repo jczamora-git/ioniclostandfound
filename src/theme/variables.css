@@ -1,2 +1,218 @@
-/* For information on how to create your own theme, please refer to:
-http://ionicframework.com/docs/theming/ */
+/* Modern Mobile Design System Tokens & Theme Variables */
+
+:root {
+  /* System Typography Stack */
+  --ion-font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+
+  /* Primary Blue Brand Accent */
+  --ion-color-primary: #2F9FE8;
+  --ion-color-primary-rgb: 47, 159, 232;
+  --ion-color-primary-contrast: #ffffff;
+  --ion-color-primary-contrast-rgb: 255, 255, 255;
+  --ion-color-primary-shade: #168CE2;
+  --ion-color-primary-tint: #47abec;
+
+  --ion-color-secondary: #5856d6;
+  --ion-color-secondary-rgb: 88, 86, 214;
+  --ion-color-secondary-contrast: #ffffff;
+  --ion-color-secondary-contrast-rgb: 255, 255, 255;
+  --ion-color-secondary-shade: #4d4cbd;
+  --ion-color-secondary-tint: #6967da;
+
+  --ion-color-success: #22B573;
+  --ion-color-success-rgb: 34, 181, 115;
+  --ion-color-success-contrast: #ffffff;
+  --ion-color-success-contrast-rgb: 255, 255, 255;
+  --ion-color-success-shade: #1ea367;
+  --ion-color-success-tint: #38c182;
+
+  --ion-color-warning: #ff9500;
+  --ion-color-warning-rgb: 255, 149, 0;
+  --ion-color-warning-contrast: #ffffff;
+  --ion-color-warning-contrast-rgb: 255, 255, 255;
+  --ion-color-warning-shade: #e08300;
+  --ion-color-warning-tint: #ffa01a;
+
+  --ion-color-danger: #F04444;
+  --ion-color-danger-rgb: 240, 68, 68;
+  --ion-color-danger-contrast: #ffffff;
+  --ion-color-danger-contrast-rgb: 255, 255, 255;
+  --ion-color-danger-shade: #d93838;
+  --ion-color-danger-tint: #f25757;
+
+  /* App Dimensions */
+  --max-content-width: 600px;
+
+  /* ----------------------------------------------------
+     LIGHT THEME (Default)
+     ---------------------------------------------------- */
+  --ion-background-color: #F7F8FA;
+  --ion-text-color: #202124;
+
+  --app-primary: #2F9FE8;
+  --app-primary-deep: #168CE2;
+  --app-primary-soft: #DDF3FF;
+  --app-primary-subtle: #EFF8FE;
+
+  --app-bg: #F7F8FA;
+  --app-background: #F7F8FA;
+  --app-surface: #FFFFFF;
+  --app-surface-secondary: #F2F4F7;
+  --app-surface-tertiary: #E8ECEF;
+  --app-surface-elevated: #FFFFFF;
+  
+  --app-text-primary: #202124;
+  --app-text-secondary: #72777D;
+  --app-text-tertiary: #9AA0A6;
+  --app-text-muted: #9AA0A6;
+  
+  --app-border: rgba(20, 25, 30, 0.08);
+  --app-separator: rgba(20, 25, 30, 0.08);
+  --app-separator-opaque: #E8ECEF;
+  --app-card-border: rgba(20, 25, 30, 0.07);
+  --app-card-shadow: 0 6px 20px rgba(0, 0, 0, 0.04);
+  
+  --app-input-background: #F2F4F7;
+  --app-input-border: rgba(20, 25, 30, 0.08);
+
+  --app-dock-bg: rgba(255, 255, 255, 0.94);
+  --app-dock-border: rgba(20, 25, 30, 0.08);
+  --app-dock-shadow: 0 10px 32px rgba(0, 0, 0, 0.08);
+
+  /* Status Colors (Light) */
+  --status-lost-bg: rgba(240, 68, 68, 0.12);
+  --status-lost-text: #F04444;
+  --status-found-bg: rgba(34, 181, 115, 0.14);
+  --status-found-text: #22B573;
+  --status-resolved-bg: rgba(47, 159, 232, 0.14);
+  --status-resolved-text: #2F9FE8;
+
+  /* Chat Tokens (Light) */
+  --chat-own-bubble: var(--app-primary);
+  --chat-own-text: #ffffff;
+  --chat-other-bubble: var(--app-surface-secondary);
+  --chat-other-text: var(--app-text-primary);
+  --chat-composer-bg: var(--app-surface);
+  --chat-unread-dot: var(--app-primary);
+}
+
+/* ----------------------------------------------------
+   DARK THEME (Applied via .ion-palette-dark or .dark)
+   ---------------------------------------------------- */
+.ion-palette-dark,
+.dark {
+  --ion-background-color: #101214;
+  --ion-text-color: #F5F7FA;
+
+  --ion-color-primary: #3AAAF0;
+  --ion-color-primary-rgb: 58, 170, 240;
+  --ion-color-primary-shade: #2F9FE8;
+  --ion-color-primary-tint: #5abaf3;
+
+  --app-primary: #3AAAF0;
+  --app-primary-deep: #2F9FE8;
+  --app-primary-soft: rgba(58, 170, 240, 0.18);
+  --app-primary-subtle: rgba(58, 170, 240, 0.10);
+
+  --app-bg: #101214;
+  --app-background: #101214;
+  --app-surface: #181B1F;
+  --app-surface-secondary: #20242A;
+  --app-surface-tertiary: #272C33;
+  --app-surface-elevated: #20242A;
+
+  --app-text-primary: #F5F7FA;
+  --app-text-secondary: #A9B0B7;
+  --app-text-tertiary: #72777D;
+  --app-text-muted: #72777D;
+
+  --app-border: rgba(255, 255, 255, 0.08);
+  --app-separator: rgba(255, 255, 255, 0.08);
+  --app-separator-opaque: #272C33;
+  --app-card-border: rgba(255, 255, 255, 0.07);
+  --app-card-shadow: none;
+
+  --app-input-background: #20242A;
+  --app-input-border: rgba(255, 255, 255, 0.08);
+
+  --app-dock-bg: rgba(24, 27, 31, 0.94);
+  --app-dock-border: rgba(255, 255, 255, 0.08);
+  --app-dock-shadow: 0 10px 32px rgba(0, 0, 0, 0.35);
+
+  /* Status Colors (Dark) */
+  --status-lost-bg: rgba(240, 68, 68, 0.20);
+  --status-lost-text: #FF6666;
+  --status-found-bg: rgba(34, 181, 115, 0.20);
+  --status-found-text: #34D399;
+  --status-resolved-bg: rgba(58, 170, 240, 0.20);
+  --status-resolved-text: #60BFF5;
+
+  /* Chat Tokens (Dark) */
+  --chat-own-bubble: var(--app-primary);
+  --chat-own-text: #ffffff;
+  --chat-other-bubble: var(--app-surface-secondary);
+  --chat-other-text: var(--app-text-primary);
+  --chat-composer-bg: var(--app-surface);
+  --chat-unread-dot: var(--app-primary);
+
+  /* Overrides for native Ionic components */
+  --ion-card-background: #181B1F;
+  --ion-item-background: #181B1F;
+  --ion-toolbar-background: #181B1F;
+}
+
+/* Base Body and Layout Defaults */
+body {
+  background-color: var(--app-bg);
+  color: var(--app-text-primary);
+  font-family: var(--ion-font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Global Container Restriction for Tablets & Desktop */
+.ios-screen-container {
+  max-width: var(--max-content-width);
+  margin: 0 auto;
+  width: 100%;
+  min-height: 100%;
+  position: relative;
+}
+
+/* Smooth Tap Response */
+button, 
+.interactive-card,
+ion-item {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Ionic Component Overrides for Theme Harmony */
+ion-action-sheet {
+  --background: var(--app-surface);
+  --button-background: var(--app-surface);
+  --button-background-selected: var(--app-surface-secondary);
+  --button-color: var(--ion-color-primary);
+  --color: var(--app-text-primary);
+}
+
+ion-alert {
+  --background: var(--app-surface);
+}
+
+ion-toast {
+  --border-radius: 14px;
+}
+
+/* Lucide Icon Utility Class */
+.ui-icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.9;
+  color: currentColor;
+  flex-shrink: 0;
+}
+
