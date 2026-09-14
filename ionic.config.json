@@ -1,0 +1,7 @@
+{
+  "name": "ioniclostandfound",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "vue-vite"
+}
