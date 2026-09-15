@@ -1,15 +1,13 @@
 import { ref, computed } from 'vue';
-import { ref as dbRef, onValue, set, update } from 'firebase/database';
+import { ref as dbRef, onValue, set, update, get } from 'firebase/database';
 import { db } from '../firebase';
 import { useAuth, sessionUid, getSessionUser } from './useAuth';
-import { useChatSocket } from './useChatSocket';
-import { getChatServerUrl } from '../services/socket';
+import { getApiServerUrl } from '../services/socket';
 import type { AppNotification } from '../types/notification';
 
 const notifications = ref<AppNotification[]>([]);
 const loading = ref(false);
 let isSubscribed = false;
-let socketListenersRegistered = false;
 
 export const unreadNotificationCount = computed<number>(() => {
   return notifications.value.filter((n) => !n.read).length;
@@ -17,14 +15,13 @@ export const unreadNotificationCount = computed<number>(() => {
 
 export function useNotifications() {
   const { currentProfile } = useAuth();
-  const { initSocket } = useChatSocket();
 
   const sortNotifications = () => {
     notifications.value.sort((a, b) => b.createdAt - a.createdAt);
   };
 
   /**
-   * Subscribe to real-time notifications for the active user.
+   * Subscribe to notifications for the active user.
    */
   const subscribeToNotifications = async () => {
     const session = await getSessionUser();
@@ -35,74 +32,7 @@ export function useNotifications() {
     isSubscribed = true;
     loading.value = true;
 
-    // 1. Setup Socket.IO real-time listener
-    try {
-      const socket = await initSocket();
-
-      if (!socketListenersRegistered) {
-        socketListenersRegistered = true;
-
-        socket.on('notification:new', (notif: AppNotification) => {
-          if (notif && !notifications.value.some((n) => n.id === notif.id)) {
-            notifications.value.unshift(notif);
-            sortNotifications();
-          }
-        });
-
-        socket.on('notification:read', (payload: { notificationId: string }) => {
-          const target = notifications.value.find((n) => n.id === payload.notificationId);
-          if (target) {
-            target.read = true;
-          }
-        });
-
-        socket.on('notification:read-all', () => {
-          notifications.value.forEach((n) => {
-            n.read = true;
-          });
-        });
-      }
-
-      // Initial load via socket / REST
-      socket.emit(
-        'notification:list',
-        (res: { success: boolean; notifications?: AppNotification[] }) => {
-          if (res && res.success && Array.isArray(res.notifications)) {
-            // Merge with existing avoiding duplicates
-            res.notifications.forEach((notif) => {
-              if (!notifications.value.some((n) => n.id === notif.id)) {
-                notifications.value.push(notif);
-              }
-            });
-            sortNotifications();
-            loading.value = false;
-          }
-        }
-      );
-    } catch (err) {
-      console.warn('[useNotifications] Socket connection warning:', err);
-    }
-
-    // 2. Fallback to REST endpoint
-    try {
-      const serverUrl = getChatServerUrl();
-      if (serverUrl) {
-        const res = await fetch(`${serverUrl}/api/notifications/${myUid}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.notifications)) {
-            data.notifications.forEach((notif: AppNotification) => {
-              if (!notifications.value.some((n) => n.id === notif.id)) {
-                notifications.value.push(notif);
-              }
-            });
-            sortNotifications();
-          }
-        }
-      }
-    } catch {}
-
-    // 3. Real Firebase RTDB listener if available
+    // 1. Firebase RTDB listener
     try {
       const notifsRef = dbRef(db, `notifications/${myUid}`);
       onValue(notifsRef, (snapshot) => {
@@ -136,6 +66,25 @@ export function useNotifications() {
     } catch {
       loading.value = false;
     }
+
+    // 2. Initial fetch / Fallback via REST
+    try {
+      const serverUrl = getApiServerUrl();
+      if (serverUrl) {
+        const res = await fetch(`${serverUrl}/api/notifications/${myUid}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.notifications)) {
+            data.notifications.forEach((notif: AppNotification) => {
+              if (!notifications.value.some((n) => n.id === notif.id)) {
+                notifications.value.push(notif);
+              }
+            });
+            sortNotifications();
+          }
+        }
+      }
+    } catch {}
   };
 
   /**
@@ -148,21 +97,13 @@ export function useNotifications() {
       target.read = true;
     }
 
-    // Update Firebase RTDB
     if (myUid) {
       try {
         await update(dbRef(db, `notifications/${myUid}/${notificationId}`), { read: true });
       } catch {}
 
-      // Update Socket/Server
       try {
-        const socket = await initSocket();
-        socket.emit('notification:read', { notificationId });
-      } catch {}
-
-      // Fallback REST
-      try {
-        const serverUrl = getChatServerUrl();
+        const serverUrl = getApiServerUrl();
         if (serverUrl) {
           fetch(`${serverUrl}/api/notifications/${myUid}/read/${notificationId}`, {
             method: 'POST'
@@ -182,7 +123,6 @@ export function useNotifications() {
     });
 
     if (myUid) {
-      // Update Firebase RTDB
       try {
         const updates: Record<string, any> = {};
         notifications.value.forEach((n) => {
@@ -191,15 +131,8 @@ export function useNotifications() {
         await update(dbRef(db), updates);
       } catch {}
 
-      // Update Socket
       try {
-        const socket = await initSocket();
-        socket.emit('notification:read-all');
-      } catch {}
-
-      // Fallback REST
-      try {
-        const serverUrl = getChatServerUrl();
+        const serverUrl = getApiServerUrl();
         if (serverUrl) {
           fetch(`${serverUrl}/api/notifications/${myUid}/read-all`, {
             method: 'POST'
@@ -211,7 +144,6 @@ export function useNotifications() {
 
   /**
    * Create and deliver a comment notification to the post author.
-   * Only creates notification if commenter is NOT the post author.
    */
   const createCommentNotification = async (params: {
     postAuthorId: string;
@@ -224,7 +156,6 @@ export function useNotifications() {
     const currentUid = session?.uid || currentProfile.value?.id;
     if (!currentUid) return;
 
-    // Do not notify author about their own comment
     if (params.postAuthorId === currentUid) {
       return;
     }
@@ -245,23 +176,9 @@ export function useNotifications() {
       read: false
     };
 
-    // 1. Try Firebase RTDB
     try {
       await set(dbRef(db, `notifications/${params.postAuthorId}/${notifId}`), notification);
-    } catch (err) {
-      // Silently continue to socket/REST delivery if RTDB auth fails
-    }
-
-    // 2. Deliver via real-time Socket to target user room
-    try {
-      const socket = await initSocket();
-      socket.emit('notification:send', {
-        targetUserId: params.postAuthorId,
-        notification
-      });
-    } catch (err) {
-      console.warn('[useNotifications] Failed to emit notification via socket:', err);
-    }
+    } catch {}
   };
 
   /**
@@ -278,7 +195,6 @@ export function useNotifications() {
     const currentUid = session?.uid || currentProfile.value?.id;
     if (!currentUid) return;
 
-    // Do not notify author about their own reply
     if (params.targetAuthorId === currentUid) {
       return;
     }
@@ -299,21 +215,9 @@ export function useNotifications() {
       read: false
     };
 
-    // 1. Try Firebase RTDB
     try {
       await set(dbRef(db, `notifications/${params.targetAuthorId}/${notifId}`), notification);
-    } catch (err) {}
-
-    // 2. Deliver via real-time Socket
-    try {
-      const socket = await initSocket();
-      socket.emit('notification:send', {
-        targetUserId: params.targetAuthorId,
-        notification
-      });
-    } catch (err) {
-      console.warn('[useNotifications] Failed to emit reply notification via socket:', err);
-    }
+    } catch {}
   };
 
   /**
@@ -348,23 +252,9 @@ export function useNotifications() {
       read: false
     };
 
-    // 1. Try Firebase RTDB
     try {
       await set(dbRef(db, `notifications/${params.recipientId}/${notifId}`), notification);
-    } catch (err) {
-      // Silently continue to socket/REST delivery
-    }
-
-    // 2. Deliver via real-time Socket to target user room
-    try {
-      const socket = await initSocket();
-      socket.emit('notification:send', {
-        targetUserId: params.recipientId,
-        notification
-      });
-    } catch (err) {
-      console.warn('[useNotifications] Failed to emit merit notification via socket:', err);
-    }
+    } catch {}
   };
 
   return {

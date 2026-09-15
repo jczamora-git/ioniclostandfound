@@ -1,7 +1,20 @@
 <template>
   <ion-page>
     <!-- Fixed Page Header -->
-    <PageHeader title="Messages" />
+    <PageHeader title="Messages">
+      <template #action>
+        <button
+          type="button"
+          class="header-refresh-btn"
+          aria-label="Refresh conversations"
+          title="Refresh conversations"
+          :disabled="isConversationsLoading"
+          @click="handleManualRefresh"
+        >
+          <RefreshCw :size="18" :class="{ 'spinning': isConversationsLoading }" />
+        </button>
+      </template>
+    </PageHeader>
 
     <ion-content :fullscreen="true" class="messages-content">
       <ion-refresher slot="fixed" @ion-refresh="handleRefresh">
@@ -125,6 +138,12 @@ onUnmounted(() => {
 
 const handleRetry = () => {
   subscribeToConversations();
+};
+
+const handleManualRefresh = () => {
+  if (hasValidSession.value) {
+    subscribeToConversations();
+  }
 };
 
 const handleRefresh = async (event: any) => {
@@ -302,5 +321,41 @@ const handleSelectConversation = (convId: string) => {
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--app-card-border);
+}
+
+.header-refresh-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--app-border, rgba(255, 255, 255, 0.12));
+  background: var(--app-surface-subtle, rgba(255, 255, 255, 0.06));
+  color: var(--app-text-primary, #ffffff);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.header-refresh-btn:hover:not(:disabled) {
+  background: var(--app-surface-hover, rgba(255, 255, 255, 0.12));
+}
+
+.header-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

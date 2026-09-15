@@ -1,43 +1,69 @@
 import admin from 'firebase-admin';
 import dotenv from 'dotenv';
+import path from 'path';
 import type { Conversation, Message } from './types/chat.js';
 
 dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), 'server/.env') });
 
-const projectId = process.env.FIREBASE_PROJECT_ID || 'ioniclostandfound';
+const projectId =
+  process.env.FIREBASE_PROJECT_ID ||
+  process.env.VITE_FIREBASE_PROJECT_ID ||
+  'ioniclostandfound';
+
 const databaseURL =
   process.env.FIREBASE_DATABASE_URL ||
+  process.env.VITE_FIREBASE_DATABASE_URL ||
   'https://ioniclostandfound-default-rtdb.asia-southeast1.firebasedatabase.app/';
 
-if (!admin.apps.length) {
+function getFirebaseAdminApp() {
+  if (admin.apps.length > 0) {
+    return admin.app();
+  }
+
   try {
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      admin.initializeApp({
+      return admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         databaseURL
       });
-      console.log('Firebase Admin initialized with FIREBASE_SERVICE_ACCOUNT');
+    } else if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
+      const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+      return admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey
+        }),
+        databaseURL
+      });
     } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      admin.initializeApp({
+      return admin.initializeApp({
         credential: admin.credential.applicationDefault(),
         databaseURL
       });
-      console.log('Firebase Admin initialized with GOOGLE_APPLICATION_CREDENTIALS');
     } else {
-      admin.initializeApp({
+      return admin.initializeApp({
         projectId,
         databaseURL
       });
-      console.log('Firebase Admin initialized with Project ID and Database URL');
     }
-  } catch (err) {
-    console.error('Failed to initialize Firebase Admin SDK:', err);
+  } catch (err: any) {
+    // If already initialized by another thread/invocation
+    if (admin.apps.length > 0) {
+      return admin.app();
+    }
+    console.error('[Firebase Admin] Initialization error:', err?.message || err);
+    throw err;
   }
 }
 
-export const adminAuth = admin.auth();
-export const adminDb = admin.database();
+// Initialize singleton app instance safely
+const firebaseAdminApp = getFirebaseAdminApp();
+
+export const adminAuth = firebaseAdminApp.auth();
+export const adminDb = firebaseAdminApp.database();
 
 /**
  * Verify Firebase ID token.
@@ -53,16 +79,15 @@ export async function verifyToken(token: string): Promise<string> {
     const decoded = await adminAuth.verifyIdToken(token);
     return decoded.uid;
   } catch (err: any) {
-    // If standard verification fails (e.g. In local development without service account cert),
+    // If standard verification fails (e.g. In local development / mock sessions),
     // safely decode JWT payload for development testing
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV !== 'production' || process.env.VITE_DEV_BYPASS_AUTH === 'true') {
       try {
         const parts = token.split('.');
         if (parts.length === 3) {
           const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
           if (payload.user_id || payload.sub) {
             const devUid = payload.user_id || payload.sub;
-            console.warn(`[Dev Auth] Token verified via JWT payload decode for UID: ${devUid}`);
             return devUid;
           }
         }
@@ -70,7 +95,6 @@ export async function verifyToken(token: string): Promise<string> {
         // ignore and let original error throw
       }
     }
-    console.error('Firebase token verification error:', err.message);
     throw new Error(`Invalid authentication token: ${err.message}`);
   }
 }
@@ -84,7 +108,6 @@ export async function findConversation(
   userB: string
 ): Promise<Conversation | null> {
   try {
-    // Check userA's indexed conversations
     const snap = await adminDb.ref(`userConversations/${userA}`).once('value');
     if (!snap.exists()) return null;
 
@@ -120,7 +143,6 @@ export async function saveConversation(conv: Conversation): Promise<void> {
   const updates: Record<string, any> = {};
   updates[`conversations/${conv.id}`] = conv;
 
-  // Index conversation for both participants
   conv.participantIds.forEach((uid) => {
     updates[`userConversations/${uid}/${conv.id}`] = {
       updatedAt: conv.updatedAt,
@@ -163,8 +185,8 @@ export async function saveMessage(msg: Message): Promise<void> {
 }
 
 /**
-  * Normalize username: trim, lowercase, remove leading @, strip invalid characters
-  */
+ * Normalize username: trim, lowercase, remove leading @, strip invalid characters
+ */
 export function normalizeUsername(username: string): string {
   return username.trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9_.]/g, '');
 }

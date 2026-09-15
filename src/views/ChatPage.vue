@@ -8,23 +8,39 @@
       @back="handleBack"
     >
       <template #action>
-        <button
-          type="button"
-          class="header-icon-btn"
-          aria-label="View user profile"
-          @click="handleOpenProfile"
-        >
-          <UserAvatar
-            :name="otherParticipant?.name || 'User'"
-            :username="otherParticipant?.username || 'user'"
-            :avatar-url="otherParticipant?.avatarUrl"
-            size="sm"
-          />
-        </button>
+        <div class="header-actions-row">
+          <button
+            type="button"
+            class="header-icon-btn refresh-btn"
+            aria-label="Refresh messages"
+            title="Refresh messages"
+            :disabled="isRefreshing"
+            @click="handleManualRefreshButton"
+          >
+            <RefreshCw :size="18" :class="{ 'spinning': isRefreshing }" />
+          </button>
+          <button
+            type="button"
+            class="header-icon-btn"
+            aria-label="View user profile"
+            @click="handleOpenProfile"
+          >
+            <UserAvatar
+              :name="otherParticipant?.name || 'User'"
+              :username="otherParticipant?.username || 'user'"
+              :avatar-url="otherParticipant?.avatarUrl"
+              size="sm"
+            />
+          </button>
+        </div>
       </template>
     </PageHeader>
 
     <ion-content :fullscreen="true" class="chat-content">
+      <ion-refresher slot="fixed" @ion-refresh="handleIonRefresh">
+        <ion-refresher-content pulling-icon="arrow-down" refreshing-spinner="crescent" />
+      </ion-refresher>
+
       <div class="chat-view-container">
         <!-- Message History Timeline Stream -->
         <div ref="scrollContainerRef" class="chat-messages-scroll">
@@ -246,8 +262,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { IonPage, IonContent, IonSkeletonText, toastController } from '@ionic/vue';
-import { ShieldAlert, Image, ChevronRight, Reply, X } from 'lucide-vue-next';
+import {
+  IonPage,
+  IonContent,
+  IonRefresher,
+  IonRefresherContent,
+  IonSkeletonText,
+  toastController
+} from '@ionic/vue';
+import { ShieldAlert, Image, ChevronRight, Reply, X, RefreshCw } from 'lucide-vue-next';
 import PageHeader from '../components/PageHeader.vue';
 import UserAvatar from '../components/UserAvatar.vue';
 import MessageBubble from '../components/MessageBubble.vue';
@@ -511,6 +534,34 @@ const openFullscreenImage = (url: string) => {
   fullscreenImageUrl.value = url;
 };
 
+const isRefreshing = ref(false);
+
+const handleRefreshMessages = async () => {
+  if (isRefreshing.value) return;
+  isRefreshing.value = true;
+  try {
+    markAsRead(conversationId.value, 'all');
+    await loadHistory('all');
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.warn('[ChatPage] Manual refresh warning:', err);
+    }
+  } finally {
+    isRefreshing.value = false;
+  }
+};
+
+const handleIonRefresh = async (event: any) => {
+  await handleRefreshMessages();
+  setTimeout(() => {
+    event.target.complete();
+  }, 300);
+};
+
+const handleManualRefreshButton = async () => {
+  await handleRefreshMessages();
+};
+
 onMounted(async () => {
   markAsRead(conversationId.value, 'all');
 
@@ -602,9 +653,8 @@ onMounted(async () => {
     }
   }
 
-  // 2. Load merged conversation history and connect realtime socket
+  // 2. Load merged conversation history
   await loadHistory('all');
-  await setupSocketListeners();
 
   // 3. If navigated with an initial post thread target (from "Message Poster"), pre-set composer context
   const targetPostId =
@@ -626,7 +676,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   markAsRead(conversationId.value, 'all');
-  cleanup();
 });
 
 const handleSendMessage = async (payload: { text: string; file: File | null }) => {
@@ -1147,6 +1196,48 @@ const handleOpenProfile = () => {
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.header-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.refresh-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--app-border, rgba(255, 255, 255, 0.12));
+  background: var(--app-surface-subtle, rgba(255, 255, 255, 0.06));
+  color: var(--app-text-primary, #ffffff);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: var(--app-surface-hover, rgba(255, 255, 255, 0.12));
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes fadeIn {

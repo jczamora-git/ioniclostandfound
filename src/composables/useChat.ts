@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue';
 import { ref as dbRef, get } from 'firebase/database';
 import { db } from '../firebase';
-import { useChatSocket, onMessageNew, onThreadUpdated } from './useChatSocket';
+import { useChatSocket } from './useChatSocket';
 import { useConversations } from './useConversations';
 import { useAuth } from './useAuth';
 import { getChatServerUrl } from '../services/socket';
@@ -10,16 +10,9 @@ import type { ConversationThread } from '../types/conversation';
 
 export function useChat(conversationId: string, initialThreadId = 'general') {
   const {
-    initSocket,
-    joinConversation,
-    joinThread,
-    leaveThread,
-    leaveConversation,
     sendMessage,
     getConversationMessages,
-    getThreads,
-    emitTypingStart,
-    emitTypingStop
+    getThreads
   } = useChatSocket();
   const { markAsRead } = useConversations();
   const { sessionUid } = useAuth();
@@ -233,86 +226,13 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
   const switchThread = async (newThreadId: string) => {
     if (newThreadId === activeThreadId.value) return;
 
-    const oldThreadId = activeThreadId.value;
-    leaveThread(conversationId, oldThreadId);
-
     activeThreadId.value = newThreadId;
-    await joinThread(conversationId, newThreadId);
-
     markAsRead(conversationId, newThreadId);
     await loadHistory('all');
   };
 
   const setupSocketListeners = async () => {
-    try {
-      const socket = await initSocket();
-
-      // Join conversation room and all thread rooms
-      await joinConversation(conversationId, activeThreadId.value);
-      await joinThread(conversationId, 'general');
-
-      for (const t of threads.value) {
-        if (t.id && t.id !== 'general') {
-          joinThread(conversationId, t.id).catch(() => {});
-        }
-      }
-
-      // Listen for thread updates & auto-join new threads
-      unregisterThreadListener = onThreadUpdated((updatedThread: ConversationThread) => {
-        if (updatedThread.conversationId === conversationId) {
-          const idx = threads.value.findIndex((t) => t.id === updatedThread.id);
-          if (idx !== -1) {
-            threads.value[idx] = { ...updatedThread };
-          } else {
-            threads.value.push({ ...updatedThread });
-            joinThread(conversationId, updatedThread.id).catch(() => {});
-          }
-        }
-      });
-
-      // Listen for incoming messages in real-time across ALL threads
-      unregisterMessageListener = onMessageNew((msg: ChatMessage) => {
-        if (!msg || msg.conversationId !== conversationId) return;
-
-        messageMap.set(msg.id, msg);
-        sortAndSyncMessages();
-        markAsRead(conversationId, msg.threadId || 'general');
-      });
-
-      // Ephemeral typing indicators
-      socket.on(
-        'typing:start',
-        (data: { conversationId: string; threadId?: string; uid: string }) => {
-          if (
-            data.conversationId === conversationId &&
-            data.uid !== sessionUid.value
-          ) {
-            isOtherTyping.value = true;
-            clearTimeout(typingTimer);
-            typingTimer = setTimeout(() => {
-              isOtherTyping.value = false;
-            }, 3000);
-          }
-        }
-      );
-
-      socket.on(
-        'typing:stop',
-        (data: { conversationId: string; threadId?: string; uid: string }) => {
-          if (
-            data.conversationId === conversationId &&
-            data.uid !== sessionUid.value
-          ) {
-            isOtherTyping.value = false;
-            clearTimeout(typingTimer);
-          }
-        }
-      );
-    } catch (err) {
-      if (import.meta.env.DEV) {
-        console.warn('[useChat] Socket listener setup warning:', err);
-      }
-    }
+    // Stateless mode: No socket listeners needed
   };
 
   const sendChatMessage = async (
@@ -327,7 +247,6 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
     messageMap.set(msg.id, msg);
     sortAndSyncMessages();
 
-    emitTypingStop(conversationId, threadId);
     return msg;
   };
 
@@ -336,20 +255,10 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
   };
 
   const handleTyping = () => {
-    emitTypingStart(conversationId, activeThreadId.value);
+    // Stateless mode: No-op
   };
 
   const cleanup = () => {
-    if (unregisterMessageListener) {
-      unregisterMessageListener();
-      unregisterMessageListener = null;
-    }
-    if (unregisterThreadListener) {
-      unregisterThreadListener();
-      unregisterThreadListener = null;
-    }
-    leaveThread(conversationId, activeThreadId.value);
-    leaveConversation(conversationId);
     clearTimeout(typingTimer);
   };
 
