@@ -10,7 +10,7 @@
           <button
             type="button"
             class="header-save-btn"
-            :disabled="saving"
+            :disabled="saving || loading || !post"
             @click="handleSave"
           >
             <ion-spinner v-if="saving" name="crescent" class="btn-spinner" />
@@ -53,30 +53,19 @@
             <span v-if="errors.title" class="field-error">{{ errors.title }}</span>
           </div>
 
-          <!-- Category & Date Row -->
-          <div class="two-col-row">
-            <div class="field-group half-field">
-              <label class="field-label">CATEGORY</label>
-              <div class="select-wrapper">
-                <select v-model="form.category" class="composer-select">
-                  <option v-for="cat in POST_CATEGORIES" :key="cat" :value="cat">
-                    {{ cat }}
-                  </option>
-                </select>
-                <ChevronDown :size="16" class="select-chevron" />
-              </div>
-            </div>
+          <PostCategoryFields
+            v-model:category="form.category"
+            v-model:sub-category="form.subCategory"
+            v-model:pending-subcategory="form.pendingSubcategory"
+            :disabled="saving"
+            :error="errors.category"
+          />
 
-            <div class="field-group half-field">
-              <label class="field-label">WHEN?</label>
-              <input
-                v-model="form.eventDate"
-                type="date"
-                class="composer-input date-input"
-              />
-              <span v-if="errors.eventDate" class="field-error">{{ errors.eventDate }}</span>
-            </div>
-          </div>
+          <CustomDatePicker
+            v-model="form.eventDate"
+            :disabled="saving"
+            :error="errors.eventDate"
+          />
 
           <!-- Location -->
           <div class="field-group">
@@ -107,33 +96,54 @@
             <span v-if="errors.description" class="field-error">{{ errors.description }}</span>
           </div>
 
-          <!-- Photo URL -->
+          <!-- Photo Attachment Section -->
           <div class="field-group">
-            <label class="field-label">PHOTO URL (OPTIONAL)</label>
-            <div class="input-with-icon">
-              <ImageIcon :size="16" class="leading-icon" />
-              <input
-                v-model="form.imageUrl"
-                type="url"
-                class="composer-input with-icon"
-                placeholder="Paste image URL..."
-              />
+            <label class="field-label">PHOTO (OPTIONAL)</label>
+            <div v-if="previewPhotoUrl" class="photo-preview-box">
+              <img :src="previewPhotoUrl" alt="Post preview" class="preview-img" />
+              <div class="photo-overlay-actions">
+                <button
+                  type="button"
+                  class="overlay-action-btn change-btn"
+                  :disabled="saving"
+                  @click="triggerPhotoPicker"
+                >
+                  <Camera :size="14" />
+                  <span>Change</span>
+                </button>
+                <button
+                  type="button"
+                  class="overlay-action-btn remove-btn"
+                  :disabled="saving"
+                  @click="removePhoto"
+                >
+                  <Trash2 :size="14" />
+                  <span>Remove</span>
+                </button>
+              </div>
+            </div>
+
+            <div v-else class="photo-add-box">
               <button
-                v-if="form.imageUrl"
                 type="button"
-                class="clear-photo-btn"
-                @click="form.imageUrl = ''"
+                class="add-photo-btn"
+                :disabled="saving"
+                @click="triggerPhotoPicker"
               >
-                <X :size="16" />
+                <ImagePlus :size="18" />
+                <span>Add Photo</span>
               </button>
             </div>
 
-            <div v-if="form.imageUrl" class="photo-preview-box">
-              <img :src="form.imageUrl" alt="Preview" class="preview-img" />
-              <button type="button" class="remove-preview-btn" @click="form.imageUrl = ''">
-                <X :size="16" />
-              </button>
-            </div>
+            <span v-if="photoError" class="field-error">{{ photoError }}</span>
+
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              class="hidden-file-input"
+              @change="onPhotoSelected"
+            />
           </div>
         </div>
       </div>
@@ -142,7 +152,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   IonBackButton,
@@ -156,13 +166,16 @@ import {
   toastController
 } from "@ionic/vue";
 import {
-  ChevronDown,
   MapPin,
-  Image as ImageIcon,
-  X
+  ImagePlus,
+  Camera,
+  Trash2
 } from "lucide-vue-next";
 import { usePosts } from "../composables/usePosts";
-import { POST_CATEGORIES, type Post, type PostFormData, type PostFormErrors } from "../types/post";
+import { validateImageFile } from "../composables/useStorageUpload";
+import PostCategoryFields from "../components/PostCategoryFields.vue";
+import CustomDatePicker from "../components/CustomDatePicker.vue";
+import { type Post, type PostFormData, type PostFormErrors } from "../types/post";
 
 const route = useRoute();
 const router = useRouter();
@@ -173,10 +186,18 @@ const post = ref<Post | null>(null);
 const loading = ref(true);
 const saving = ref(false);
 
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const selectedPhotoFile = ref<File | null>(null);
+const previewPhotoUrl = ref("");
+const removePhotoFlag = ref(false);
+const photoError = ref("");
+
 const form = reactive<PostFormData>({
   type: "lost",
   title: "",
-  category: "Other",
+  category: "",
+  subCategory: "",
+  pendingSubcategory: undefined,
   description: "",
   location: "",
   eventDate: "",
@@ -192,13 +213,58 @@ onMounted(async () => {
     form.type = post.value.type;
     form.title = post.value.title;
     form.category = post.value.category;
+    form.subCategory = post.value.subCategory;
     form.description = post.value.description;
     form.location = post.value.location;
     form.eventDate = post.value.eventDate;
     form.imageUrl = post.value.imageUrl || "";
+    previewPhotoUrl.value = post.value.imageUrl || "";
   }
   loading.value = false;
 });
+
+onUnmounted(() => {
+  if (previewPhotoUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewPhotoUrl.value);
+  }
+});
+
+const triggerPhotoPicker = () => {
+  fileInputRef.value?.click();
+};
+
+const onPhotoSelected = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  const validation = validateImageFile(file);
+  if (!validation.valid) {
+    photoError.value = validation.error || "Please select a valid image.";
+    if (fileInputRef.value) fileInputRef.value.value = "";
+    return;
+  }
+
+  if (previewPhotoUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewPhotoUrl.value);
+  }
+
+  selectedPhotoFile.value = file;
+  previewPhotoUrl.value = URL.createObjectURL(file);
+  removePhotoFlag.value = false;
+  photoError.value = "";
+};
+
+const removePhoto = () => {
+  if (previewPhotoUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewPhotoUrl.value);
+  }
+  selectedPhotoFile.value = null;
+  previewPhotoUrl.value = "";
+  removePhotoFlag.value = true;
+  photoError.value = "";
+  if (fileInputRef.value) fileInputRef.value.value = "";
+};
 
 const validate = (): boolean => {
   let valid = true;
@@ -206,6 +272,10 @@ const validate = (): boolean => {
 
   if (!form.title.trim()) {
     errors.title = "Title is required.";
+    valid = false;
+  }
+  if (!form.category) {
+    errors.category = "Choose a category.";
     valid = false;
   }
   if (!form.description.trim()) {
@@ -225,16 +295,19 @@ const validate = (): boolean => {
 };
 
 const handleSave = async () => {
-  if (!validate()) return;
+  if (saving.value || loading.value || !post.value || !validate()) return;
   saving.value = true;
   try {
     await updatePost(postId.value, {
       title: form.title,
       category: form.category,
+      subCategory: form.subCategory,
+      pendingSubcategory: form.pendingSubcategory,
       description: form.description,
       location: form.location,
       eventDate: form.eventDate,
-      imageUrl: form.imageUrl || undefined
+      imageFile: selectedPhotoFile.value,
+      removeImage: removePhotoFlag.value
     });
 
     const toast = await toastController.create({
@@ -357,15 +430,6 @@ const handleSave = async () => {
   gap: 6px;
 }
 
-.two-col-row {
-  display: flex;
-  gap: 12px;
-}
-
-.half-field {
-  flex: 1;
-}
-
 .field-label {
   font-size: 11px;
   font-weight: 700;
@@ -374,7 +438,6 @@ const handleSave = async () => {
 }
 
 .composer-input,
-.composer-select,
 .composer-textarea {
   width: 100%;
   background: var(--app-input-background);
@@ -389,13 +452,11 @@ const handleSave = async () => {
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.composer-input,
-.composer-select {
+.composer-input {
   height: 48px;
 }
 
 .composer-input:focus,
-.composer-select:focus,
 .composer-textarea:focus {
   border-color: var(--ion-color-primary);
 }
@@ -426,45 +487,19 @@ const handleSave = async () => {
   padding-left: 38px;
 }
 
-.select-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.select-chevron {
-  position: absolute;
-  right: 12px;
-  font-size: 16px;
-  color: var(--app-text-secondary);
-  pointer-events: none;
-}
-
 .field-error {
   font-size: 12px;
   color: var(--ion-color-danger);
-}
-
-.clear-photo-btn {
-  position: absolute;
-  right: 10px;
-  background: transparent;
-  border: none;
-  color: var(--app-text-secondary);
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
 }
 
 .photo-preview-box {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  max-height: 180px;
+  max-height: 220px;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--app-separator);
+  border: 1px solid var(--app-card-border);
   margin-top: 4px;
 }
 
@@ -472,22 +507,69 @@ const handleSave = async () => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
-.remove-preview-btn {
+.photo-overlay-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
-  color: #ffffff;
-  border: none;
+  bottom: 10px;
+  right: 10px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+}
+
+.overlay-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 16px;
+  border: none;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffffff;
+  backdrop-filter: blur(8px);
+  transition: background-color 0.15s ease;
+}
+
+.overlay-action-btn:active {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.overlay-action-btn.remove-btn:hover,
+.overlay-action-btn.remove-btn:active {
+  background: rgba(239, 68, 68, 0.85);
+}
+
+.photo-add-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.add-photo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 8px 14px;
+  background: var(--app-surface-secondary);
+  border: 1px dashed var(--app-card-border);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.add-photo-btn:active {
+  background: var(--app-surface-tertiary, rgba(20, 25, 30, 0.08));
+}
+
+.hidden-file-input {
+  display: none;
 }
 </style>

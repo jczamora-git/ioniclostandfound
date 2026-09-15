@@ -87,9 +87,11 @@ const handleSend = () => {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 44px;
+  height: 44px;
   background: var(--app-surface-secondary);
-  border-radius: 20px;
-  padding: 4px 8px 4px 14px;
+  border-radius: 22px;
+  padding: 0 6px 0 14px;
   border: 1px solid var(--app-card-border);
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }

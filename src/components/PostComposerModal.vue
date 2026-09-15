@@ -30,6 +30,7 @@
           <UserAvatar
             :name="currentProfile?.name || 'User'"
             :username="currentProfile?.username || 'user'"
+            :avatar-url="currentProfile?.avatarUrl"
             size="md"
           />
           <div class="author-meta">
@@ -84,88 +85,63 @@
           <span v-if="errors.description" class="field-error-text">{{ errors.description }}</span>
         </div>
 
-        <!-- Photo Attachment Preview or Add Photo Row -->
-        <div v-if="form.imageUrl" class="photo-preview-wrap">
-          <img :src="form.imageUrl" alt="Attached photo" class="preview-img" />
-          <button
-            type="button"
-            class="remove-photo-btn"
-            aria-label="Remove photo"
-            @click="form.imageUrl = ''"
-          >
-            <X :size="16" />
-          </button>
+        <!-- Photo Attachment Preview or Add Photo Button -->
+        <div v-if="previewPhotoUrl" class="photo-preview-wrap">
+          <img :src="previewPhotoUrl" alt="Attached photo" class="preview-img" />
+          <div class="photo-overlay-actions">
+            <button
+              type="button"
+              class="overlay-action-btn change-btn"
+              :disabled="submitting"
+              @click="triggerPhotoPicker"
+            >
+              <Camera :size="14" />
+              <span>Change</span>
+            </button>
+            <button
+              type="button"
+              class="overlay-action-btn remove-btn"
+              :disabled="submitting"
+              @click="removePhoto"
+            >
+              <Trash2 :size="14" />
+              <span>Remove</span>
+            </button>
+          </div>
         </div>
 
         <div v-else class="photo-add-section">
           <button
             type="button"
             class="add-photo-btn"
-            @click="showPhotoInput = !showPhotoInput"
+            :disabled="submitting"
+            @click="triggerPhotoPicker"
           >
             <ImagePlus :size="18" />
             <span>Add Photo</span>
           </button>
-
-          <div v-if="showPhotoInput" class="photo-input-drawer">
-            <input
-              v-model="form.imageUrl"
-              type="url"
-              class="photo-url-input"
-              placeholder="Paste image URL here..."
-            />
-            <div class="sample-photos-row">
-              <span class="sample-label">Quick samples:</span>
-              <button
-                type="button"
-                class="sample-chip"
-                @click="form.imageUrl = 'https://images.unsplash.com/photo-1627123424574-724758594e93?w=600&auto=format&fit=crop&q=80'"
-              >
-                Wallet
-              </button>
-              <button
-                type="button"
-                class="sample-chip"
-                @click="form.imageUrl = 'https://images.unsplash.com/photo-1588423771073-b8903fbb85b5?w=600&auto=format&fit=crop&q=80'"
-              >
-                AirPods
-              </button>
-              <button
-                type="button"
-                class="sample-chip"
-                @click="form.imageUrl = 'https://images.unsplash.com/photo-1579586337278-3befd40fd17a?w=600&auto=format&fit=crop&q=80'"
-              >
-                Keys
-              </button>
-              <button
-                type="button"
-                class="sample-chip"
-                @click="form.imageUrl = 'https://images.unsplash.com/photo-1543610892-0b1f7e6d8ac1?w=600&auto=format&fit=crop&q=80'"
-              >
-                ID Card
-              </button>
-            </div>
-          </div>
         </div>
+
+        <span v-if="photoError" class="field-error-text">{{ photoError }}</span>
+
+        <input
+          ref="fileInputRef"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          class="hidden-file-input"
+          @change="onPhotoSelected"
+        />
 
         <!-- Attachment Rows (Compact list, no cards) -->
         <div class="attachment-rows-list">
-          <!-- Category Row with overlay select -->
-          <label class="attachment-row">
-            <div class="row-left">
-              <Tag :size="16" class="row-icon" />
-              <span class="row-label">Category</span>
-            </div>
-            <div class="row-right">
-              <span class="row-value">{{ form.category }}</span>
-              <select v-model="form.category" class="invisible-select">
-                <option v-for="cat in POST_CATEGORIES" :key="cat" :value="cat">
-                  {{ cat }}
-                </option>
-              </select>
-              <ChevronRight :size="16" class="row-chevron" />
-            </div>
-          </label>
+          <PostCategoryFields
+            :key="formSession"
+            v-model:category="form.category"
+            v-model:sub-category="form.subCategory"
+            v-model:pending-subcategory="form.pendingSubcategory"
+            :disabled="submitting"
+            :error="errors.category"
+          />
 
           <!-- Location Row -->
           <div class="attachment-row">
@@ -184,21 +160,12 @@
             </div>
           </div>
 
-          <!-- Date Row -->
-          <label class="attachment-row">
-            <div class="row-left">
-              <CalendarDays :size="16" class="row-icon" />
-              <span class="row-label">Date</span>
-            </div>
-            <div class="row-right">
-              <input
-                v-model="form.eventDate"
-                type="date"
-                class="row-date-input"
-              />
-              <ChevronRight :size="16" class="row-chevron" />
-            </div>
-          </label>
+          <!-- Date Row (Custom Calendar Picker) -->
+          <CustomDatePicker
+            v-model="form.eventDate"
+            :disabled="submitting"
+            :error="errors.eventDate"
+          />
         </div>
 
         <!-- Visibility Footer -->
@@ -215,19 +182,18 @@
 import { computed, reactive, ref, watch } from "vue";
 import { IonModal, IonSpinner } from "@ionic/vue";
 import {
-  Tag,
   MapPin,
-  CalendarDays,
   ImagePlus,
-  ChevronRight,
-  Globe,
-  X
+  Camera,
+  Trash2,
+  Globe
 } from "lucide-vue-next";
 import UserAvatar from "./UserAvatar.vue";
+import PostCategoryFields from "./PostCategoryFields.vue";
+import CustomDatePicker from "./CustomDatePicker.vue";
 import { useAuth } from "../composables/useAuth";
+import { validateImageFile } from "../composables/useStorageUpload";
 import {
-  POST_CATEGORIES,
-  type PostCategory,
   type PostFormData,
   type PostFormErrors,
   type PostType
@@ -250,16 +216,22 @@ const emit = defineEmits<{
 
 const { currentProfile } = useAuth();
 const submitting = ref(false);
-const showPhotoInput = ref(false);
+const formSession = ref(0);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const previewPhotoUrl = ref("");
+const photoError = ref("");
 
 const form = reactive<PostFormData>({
   type: props.initialType,
   title: "",
-  category: "Other" as PostCategory,
+  category: "",
+  subCategory: "",
+  pendingSubcategory: undefined,
   description: "",
   location: "",
   eventDate: new Date().toISOString().split("T")[0],
-  imageUrl: ""
+  imageUrl: "",
+  imageFile: null
 });
 
 const errors = reactive<PostFormErrors>({});
@@ -267,6 +239,7 @@ const errors = reactive<PostFormErrors>({});
 const isValid = computed(() => {
   return (
     form.title.trim().length > 0 &&
+    Boolean(form.category) &&
     form.description.trim().length > 0 &&
     form.location.trim().length > 0 &&
     Boolean(form.eventDate)
@@ -284,18 +257,62 @@ watch(
   () => props.isOpen,
   (open) => {
     if (open) {
+      if (previewPhotoUrl.value?.startsWith("blob:")) {
+        URL.revokeObjectURL(previewPhotoUrl.value);
+      }
       form.type = props.initialType;
       form.title = "";
-      form.category = "Other";
+      form.category = "";
+      form.subCategory = "";
+      form.pendingSubcategory = undefined;
       form.description = "";
       form.location = "";
       form.eventDate = new Date().toISOString().split("T")[0];
       form.imageUrl = "";
-      showPhotoInput.value = false;
+      form.imageFile = null;
+      previewPhotoUrl.value = "";
+      photoError.value = "";
+      formSession.value += 1;
+      if (fileInputRef.value) fileInputRef.value.value = "";
       Object.keys(errors).forEach((k) => delete errors[k as keyof PostFormData]);
     }
   }
 );
+
+const triggerPhotoPicker = () => {
+  fileInputRef.value?.click();
+};
+
+const onPhotoSelected = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  const validation = validateImageFile(file);
+  if (!validation.valid) {
+    photoError.value = validation.error || "Please select a valid image.";
+    if (fileInputRef.value) fileInputRef.value.value = "";
+    return;
+  }
+
+  if (previewPhotoUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewPhotoUrl.value);
+  }
+
+  form.imageFile = file;
+  previewPhotoUrl.value = URL.createObjectURL(file);
+  photoError.value = "";
+};
+
+const removePhoto = () => {
+  if (previewPhotoUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewPhotoUrl.value);
+  }
+  form.imageFile = null;
+  previewPhotoUrl.value = "";
+  photoError.value = "";
+  if (fileInputRef.value) fileInputRef.value.value = "";
+};
 
 const validate = (): boolean => {
   let valid = true;
@@ -303,6 +320,10 @@ const validate = (): boolean => {
 
   if (!form.title.trim()) {
     errors.title = "Title is required.";
+    valid = false;
+  }
+  if (!form.category) {
+    errors.category = "Choose a category.";
     valid = false;
   }
   if (!form.description.trim()) {
@@ -322,7 +343,7 @@ const validate = (): boolean => {
 };
 
 const handleSubmit = async () => {
-  if (!validate()) return;
+  if (submitting.value || !validate()) return;
   submitting.value = true;
   try {
     emit("submit", { ...form });
@@ -536,8 +557,8 @@ const handleClose = () => {
 .photo-preview-wrap {
   position: relative;
   width: 100%;
-  max-height: 220px;
-  border-radius: 12px;
+  max-height: 240px;
+  border-radius: 14px;
   overflow: hidden;
   border: 1px solid var(--app-card-border);
 }
@@ -545,25 +566,43 @@ const handleClose = () => {
 .preview-img {
   width: 100%;
   height: 100%;
-  max-height: 220px;
+  max-height: 240px;
   object-fit: cover;
   display: block;
 }
 
-.remove-photo-btn {
+.photo-overlay-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #ffffff;
-  border: none;
-  border-radius: 50%;
-  width: 28px;
-  height: 28px;
+  bottom: 10px;
+  right: 10px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+}
+
+.overlay-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
+  border: none;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffffff;
+  backdrop-filter: blur(8px);
+  transition: background-color 0.15s ease;
+}
+
+.overlay-action-btn:active {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.overlay-action-btn.remove-btn:hover,
+.overlay-action-btn.remove-btn:active {
+  background: rgba(239, 68, 68, 0.85);
 }
 
 .photo-add-section {
@@ -585,48 +624,15 @@ const handleClose = () => {
   font-weight: 500;
   color: var(--app-text-secondary);
   cursor: pointer;
+  transition: background-color 0.15s ease;
 }
 
-.photo-input-drawer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--app-surface-secondary);
-  border-radius: 12px;
-  border: 1px solid var(--app-card-border);
+.add-photo-btn:active {
+  background: var(--app-surface-tertiary, rgba(20, 25, 30, 0.08));
 }
 
-.photo-url-input {
-  background: var(--app-surface);
-  border: 1px solid var(--app-card-border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 13px;
-  color: var(--app-text-primary);
-  outline: none;
-}
-
-.sample-photos-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.sample-label {
-  font-size: 11px;
-  color: var(--app-text-tertiary);
-}
-
-.sample-chip {
-  background: var(--app-surface);
-  border: 1px solid var(--app-card-border);
-  border-radius: 8px;
-  padding: 3px 8px;
-  font-size: 11px;
-  color: var(--app-text-secondary);
-  cursor: pointer;
+.hidden-file-input {
+  display: none;
 }
 
 /* Attachment Rows (Compact list, separated by thin borders) */
@@ -678,24 +684,8 @@ const handleClose = () => {
   margin-left: 12px;
 }
 
-.row-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--app-text-primary);
-}
-
 .row-chevron {
   color: var(--app-text-tertiary);
-}
-
-.invisible-select {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
 }
 
 .row-input {

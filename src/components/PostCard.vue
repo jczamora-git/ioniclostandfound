@@ -7,7 +7,6 @@
         <div class="author-meta">
           <div class="author-name-row">
             <span class="author-name">{{ post.authorName }}</span>
-            <span class="author-handle">@{{ post.authorUsername }}</span>
             <span class="author-dot">·</span>
             <time class="relative-time">{{ relativeTime }}</time>
           </div>

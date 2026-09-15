@@ -18,6 +18,27 @@
       ".read": true,
       ".write": "auth != null"
     },
+    "subcategories": {
+      ".read": true,
+      "$category": {
+        "$normalizedKey": {
+          ".write": "auth != null && newData.exists()",
+          ".validate": "newData.hasChildren(['name', 'normalizedKey'])",
+          "name": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 80 && (!data.exists() || newData.val() === data.val())"
+          },
+          "normalizedKey": {
+            ".validate": "newData.isString() && newData.val() === $normalizedKey"
+          },
+          "createdAt": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
     "comments": {
       ".read": true,
       ".write": "auth != null"

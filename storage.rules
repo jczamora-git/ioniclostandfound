@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    function isValidImage() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp)')
+          && request.resource.size <= 5 * 1024 * 1024;
+    }
+
+    // Profile Avatars:
+    // - Publicly readable by community
+    // - Authenticated users can write/delete only under their own UID path
+    match /profile-avatars/{uid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isOwner(uid) && isValidImage();
+      allow delete: if isOwner(uid);
+    }
+
+    // Post Images:
+    // - Publicly readable by community
+    // - Authenticated users can write/delete only under their own UID path
+    match /post-images/{uid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isOwner(uid) && isValidImage();
+      allow delete: if isOwner(uid);
+    }
+  }
+}

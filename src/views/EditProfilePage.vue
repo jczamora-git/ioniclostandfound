@@ -5,10 +5,42 @@
       <PageHeader title="Edit Profile" :show-back="true" default-back-url="/tabs/profile" />
 
       <div class="ios-screen-container edit-container">
-        <!-- Avatar Preview -->
+        <!-- Avatar Preview and Actions -->
         <div class="avatar-preview-section">
-          <UserAvatar :name="form.name" :username="form.username" size="xl" />
-          <span class="avatar-hint">Avatar is generated from your profile name</span>
+          <UserAvatar
+            :name="form.name"
+            :username="form.username"
+            :avatar-url="previewAvatarUrl"
+            size="xl"
+          />
+          <div class="avatar-actions-row">
+            <button
+              type="button"
+              class="avatar-action-btn change-photo-btn"
+              :disabled="saving"
+              @click="triggerPhotoPicker"
+            >
+              <Camera :size="15" />
+              <span>{{ previewAvatarUrl ? 'Change Photo' : 'Add Photo' }}</span>
+            </button>
+            <button
+              v-if="previewAvatarUrl"
+              type="button"
+              class="avatar-action-btn remove-photo-btn"
+              :disabled="saving"
+              @click="handleRemovePhoto"
+            >
+              <Trash2 :size="14" />
+              <span>Remove Photo</span>
+            </button>
+          </div>
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            class="hidden-file-input"
+            @change="onFileSelected"
+          />
         </div>
 
         <!-- Form Fields -->
@@ -82,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, onUnmounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import {
   IonContent,
@@ -90,13 +122,16 @@ import {
   IonSpinner,
   toastController
 } from "@ionic/vue";
-import { AlertCircle } from "lucide-vue-next";
+import { AlertCircle, Camera, Trash2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import UserAvatar from "../components/UserAvatar.vue";
 import { normalizeUsername, useAuth } from "../composables/useAuth";
+import { useStorageUpload } from "../composables/useStorageUpload";
+import type { ProfileFormData } from "../types/profile";
 
 const router = useRouter();
 const { currentProfile, saveProfile, checkUsernameAvailable } = useAuth();
+const { uploadAvatar, deleteStorageFile, validateImageFile } = useStorageUpload();
 
 const form = reactive({
   name: "",
@@ -108,13 +143,62 @@ const errors = reactive<Record<string, string>>({});
 const globalError = ref("");
 const saving = ref(false);
 
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const selectedFile = ref<File | null>(null);
+const previewAvatarUrl = ref<string | null>(null);
+const removeAvatar = ref(false);
+
 onMounted(() => {
   if (currentProfile.value) {
     form.name = currentProfile.value.name || "";
     form.username = currentProfile.value.username || "";
     form.phone = currentProfile.value.phone || "";
+    previewAvatarUrl.value = currentProfile.value.avatarUrl || null;
   }
 });
+
+onUnmounted(() => {
+  if (previewAvatarUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewAvatarUrl.value);
+  }
+});
+
+const triggerPhotoPicker = () => {
+  fileInputRef.value?.click();
+};
+
+const onFileSelected = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  const validation = validateImageFile(file);
+  if (!validation.valid) {
+    globalError.value = validation.error || "Please select a valid image.";
+    if (fileInputRef.value) fileInputRef.value.value = "";
+    return;
+  }
+
+  // Revoke old blob URL if created previously
+  if (previewAvatarUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewAvatarUrl.value);
+  }
+
+  selectedFile.value = file;
+  previewAvatarUrl.value = URL.createObjectURL(file);
+  removeAvatar.value = false;
+  globalError.value = "";
+};
+
+const handleRemovePhoto = () => {
+  if (previewAvatarUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewAvatarUrl.value);
+  }
+  selectedFile.value = null;
+  previewAvatarUrl.value = null;
+  removeAvatar.value = true;
+  if (fileInputRef.value) fileInputRef.value.value = "";
+};
 
 const handleUsernameInput = () => {
   form.username = normalizeUsername(form.username);
@@ -157,16 +241,43 @@ const validate = async (): Promise<boolean> => {
 };
 
 const handleSave = async () => {
-  saving.value = true;
-  try {
-    const isValid = await validate();
-    if (!isValid) return;
+  if (saving.value) return;
+  const isValid = await validate();
+  if (!isValid) return;
 
-    await saveProfile({
+  saving.value = true;
+  globalError.value = "";
+  let uploadedAvatar: { downloadUrl: string; storagePath: string } | null = null;
+
+  try {
+    const uid = currentProfile.value?.id;
+    if (selectedFile.value && uid) {
+      uploadedAvatar = await uploadAvatar(selectedFile.value, uid);
+    }
+
+    const previousAvatarPath = currentProfile.value?.avatarPath;
+
+    const payload: ProfileFormData = {
       name: form.name.trim(),
       username: normalizeUsername(form.username),
-      phone: form.phone.trim()
-    });
+      phone: form.phone.trim(),
+      ...(uploadedAvatar
+        ? { avatarUrl: uploadedAvatar.downloadUrl, avatarPath: uploadedAvatar.storagePath }
+        : removeAvatar.value
+        ? { avatarUrl: null, avatarPath: null }
+        : {})
+    };
+
+    await saveProfile(payload);
+
+    // If avatar was replaced or removed, delete previous Storage file gracefully
+    if (
+      (uploadedAvatar || removeAvatar.value) &&
+      previousAvatarPath &&
+      previousAvatarPath !== uploadedAvatar?.storagePath
+    ) {
+      await deleteStorageFile(previousAvatarPath);
+    }
 
     const toast = await toastController.create({
       message: "Profile updated successfully.",
@@ -179,6 +290,10 @@ const handleSave = async () => {
     router.replace("/tabs/profile");
   } catch (err: any) {
     console.error("Update profile error:", err);
+    // If upload succeeded but save failed, clean up uploaded file
+    if (uploadedAvatar?.storagePath) {
+      await deleteStorageFile(uploadedAvatar.storagePath);
+    }
     globalError.value = err.message || "Failed to save profile.";
   } finally {
     saving.value = false;
@@ -241,14 +356,50 @@ const handleSave = async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   padding: 8px 0;
 }
 
-.avatar-hint {
+.avatar-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
   font-size: 13px;
-  color: var(--app-text-secondary);
-  font-weight: 500;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--app-card-border);
+  transition: all 0.15s ease;
+}
+
+.change-photo-btn {
+  background: var(--app-surface-secondary);
+  color: var(--app-primary);
+}
+
+.change-photo-btn:active {
+  background: var(--app-primary-soft);
+}
+
+.remove-photo-btn {
+  background: transparent;
+  color: var(--ion-color-danger, #ef4444);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.remove-photo-btn:active {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .form-card {

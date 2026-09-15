@@ -16,8 +16,12 @@ import type {
   PostFilter,
   PostFormData,
   PostStatus,
-  PostType
+  PostType,
+  AdvancedFilterOptions
 } from "../types/post";
+import { getCategoryConfig, normalizeCategoryKey } from "../config/categories";
+import { resolveCustomSubcategory, type ResolvedCustomSubcategory } from "./useCategories";
+import { useStorageUpload } from "./useStorageUpload";
 
 const posts = ref<Post[]>([]);
 const postsLoading = ref(true);
@@ -25,6 +29,53 @@ const postsError = ref("");
 const myHelpfulMap = ref<Record<string, boolean>>({});
 
 let isSubscribed = false;
+
+const resolvePendingSubcategory = async (
+  data: Partial<PostFormData>,
+  category: string,
+  subCategory?: string
+): Promise<ResolvedCustomSubcategory | null> => {
+  const pending = data.pendingSubcategory;
+  if (!pending || !subCategory) return null;
+  const categoryKey = getCategoryConfig(category)?.key;
+  if (!categoryKey || getCategoryConfig(pending.category)?.key !== categoryKey ||
+    normalizeCategoryKey(pending.name) !== normalizeCategoryKey(subCategory)) return null;
+  return resolveCustomSubcategory(category, subCategory);
+};
+
+/** Save the post and its new shared option in one all-or-nothing Firebase update. */
+const savePostWithSubcategory = async (
+  postWrites: (name: string) => Record<string, unknown>,
+  subcategory: ResolvedCustomSubcategory
+) => {
+  const path = `subcategories/${subcategory.categoryKey}/${subcategory.normalizedKey}`;
+  try {
+    await update(dbRef(db), {
+      ...postWrites(subcategory.name),
+      [path]: {
+        name: subcategory.name,
+        normalizedKey: subcategory.normalizedKey,
+        createdAt: Date.now()
+      }
+    });
+  } catch (error) {
+    // Another publisher may have claimed this exact key with a different display name.
+    // The immutable-name rule rejects that combined write, so reuse the confirmed record.
+    let existingName: string | undefined;
+    try {
+      const snapshot = await get(dbRef(db, path));
+      const existing = snapshot.val();
+      if (snapshot.exists() && typeof existing?.name === "string" &&
+        normalizeCategoryKey(existing.name) === subcategory.normalizedKey) {
+        existingName = existing.name.trim();
+      }
+    } catch {
+      throw error;
+    }
+    if (!existingName || existingName === subcategory.name) throw error;
+    await update(dbRef(db), postWrites(existingName));
+  }
+};
 
 export function usePosts() {
   const { currentProfile, currentUser } = useAuth();
@@ -50,10 +101,12 @@ export function usePosts() {
               type: (item.type?.toLowerCase() === "found" ? "found" : "lost") as PostType,
               title: item.title || item.itemName || "Untitled Item",
               category: (item.category || "Other") as PostCategory,
+              subCategory: item.subCategory || undefined,
               description: item.description || "",
               location: item.location || "Unknown location",
               eventDate: item.eventDate || item.date || new Date().toISOString().split("T")[0],
               imageUrl: item.imageUrl || undefined,
+              imagePath: item.imagePath || undefined,
               status: (item.status?.toLowerCase() === "resolved"
                 ? "resolved"
                 : item.status?.toLowerCase() === "returned" || item.status?.toLowerCase() === "claimed"
@@ -82,7 +135,8 @@ export function usePosts() {
                   authorUsername: item.authorUsername || "community",
                   type: (item.type?.toLowerCase() === "found" ? "found" : "lost") as PostType,
                   title: item.itemName || "Untitled Item",
-                  category: "Other",
+                  category: item.category || "Other",
+                  subCategory: item.subCategory || undefined,
                   description: item.description || "",
                   location: item.location || "Unknown location",
                   eventDate: item.date || new Date().toISOString().split("T")[0],
@@ -135,10 +189,17 @@ export function usePosts() {
       throw new Error("You must complete your profile first.");
     }
 
+    const { uploadPostImage, deleteStorageFile } = useStorageUpload();
+    const uid = currentProfile.value.id;
     const postsNode = dbRef(db, "posts");
     const newPostRef = push(postsNode);
     const postId = newPostRef.key!;
     const now = Date.now();
+
+    let uploaded: { downloadUrl: string; storagePath: string } | null = null;
+    if (data.imageFile) {
+      uploaded = await uploadPostImage(data.imageFile, uid, postId);
+    }
 
     const newPost: Omit<Post, "id"> = {
       authorId: currentProfile.value.id,
@@ -147,10 +208,15 @@ export function usePosts() {
       type: data.type,
       title: data.title.trim(),
       category: data.category,
+      ...(data.subCategory?.trim() ? { subCategory: data.subCategory.trim() } : {}),
       description: data.description.trim(),
       location: data.location.trim(),
       eventDate: data.eventDate,
-      imageUrl: data.imageUrl?.trim() || undefined,
+      ...(uploaded
+        ? { imageUrl: uploaded.downloadUrl, imagePath: uploaded.storagePath }
+        : data.imageUrl?.trim()
+        ? { imageUrl: data.imageUrl.trim() }
+        : {}),
       status: "open",
       helpfulCount: 0,
       commentsCount: 0,
@@ -158,8 +224,25 @@ export function usePosts() {
       updatedAt: now
     };
 
-    await set(newPostRef, newPost);
-    return postId;
+    try {
+      const pending = await resolvePendingSubcategory(data, data.category, data.subCategory);
+      if (pending) newPost.subCategory = pending.name;
+      if (pending?.isNew) {
+        await savePostWithSubcategory(
+          (name) => ({ [`posts/${postId}`]: { ...newPost, subCategory: name } }),
+          pending
+        );
+      } else {
+        await set(newPostRef, newPost);
+      }
+      return postId;
+    } catch (saveError) {
+      // If saving post fails in database, cleanup uploaded Storage image
+      if (uploaded?.storagePath) {
+        await deleteStorageFile(uploaded.storagePath).catch(() => {});
+      }
+      throw saveError;
+    }
   };
 
   const updatePost = async (postId: string, data: Partial<PostFormData>) => {
@@ -167,10 +250,16 @@ export function usePosts() {
       throw new Error("You must be logged in to edit posts.");
     }
 
-    const post = posts.value.find((p) => p.id === postId);
+    const post = posts.value.find((p) => p.id === postId) || await getPostById(postId);
     if (!post) throw new Error("Post not found.");
     if (post.authorId !== currentProfile.value.id) {
       throw new Error("You can only edit your own posts.");
+    }
+
+    const { uploadPostImage, deleteStorageFile } = useStorageUpload();
+    let uploaded: { downloadUrl: string; storagePath: string } | null = null;
+    if (data.imageFile) {
+      uploaded = await uploadPostImage(data.imageFile, currentProfile.value.id, postId);
     }
 
     const updates: Record<string, any> = {
@@ -179,12 +268,52 @@ export function usePosts() {
 
     if (data.title !== undefined) updates.title = data.title.trim();
     if (data.category !== undefined) updates.category = data.category;
+    if (data.subCategory !== undefined) updates.subCategory = data.subCategory?.trim() || null;
     if (data.description !== undefined) updates.description = data.description.trim();
     if (data.location !== undefined) updates.location = data.location.trim();
     if (data.eventDate !== undefined) updates.eventDate = data.eventDate;
-    if (data.imageUrl !== undefined) updates.imageUrl = data.imageUrl?.trim() || null;
 
-    await update(dbRef(db, `posts/${postId}`), updates);
+    if (uploaded) {
+      updates.imageUrl = uploaded.downloadUrl;
+      updates.imagePath = uploaded.storagePath;
+    } else if (data.removeImage) {
+      updates.imageUrl = null;
+      updates.imagePath = null;
+    } else if (data.imageUrl !== undefined) {
+      updates.imageUrl = data.imageUrl?.trim() || null;
+    }
+
+    try {
+      const pending = await resolvePendingSubcategory(
+        data,
+        data.category ?? post.category,
+        data.subCategory === undefined ? post.subCategory : data.subCategory
+      );
+      if (pending) updates.subCategory = pending.name;
+      if (pending?.isNew) {
+        await savePostWithSubcategory(
+          (name) => Object.fromEntries(
+            Object.entries({ ...updates, subCategory: name }).map(([key, value]) => [
+              `posts/${postId}/${key}`, value
+            ])
+          ),
+          pending
+        );
+      } else {
+        await update(dbRef(db, `posts/${postId}`), updates);
+      }
+
+      // If update succeeded, delete old Storage file if it was replaced or removed
+      if ((uploaded || data.removeImage) && post.imagePath && post.imagePath !== uploaded?.storagePath) {
+        await deleteStorageFile(post.imagePath).catch(() => {});
+      }
+    } catch (err) {
+      // If update failed and a new file was uploaded, clean it up
+      if (uploaded?.storagePath) {
+        await deleteStorageFile(uploaded.storagePath).catch(() => {});
+      }
+      throw err;
+    }
   };
 
   const resolvePost = async (postId: string, status: "resolved" | "returned" = "resolved") => {
@@ -211,6 +340,14 @@ export function usePosts() {
     if (!post) throw new Error("Post not found.");
     if (post.authorId !== currentProfile.value.id) {
       throw new Error("You can only delete your own posts.");
+    }
+
+    // If post.imagePath exists, delete Storage file too
+    if (post.imagePath) {
+      const { deleteStorageFile } = useStorageUpload();
+      await deleteStorageFile(post.imagePath).catch((err) => {
+        console.warn("Could not delete post image from storage:", err);
+      });
     }
 
     // Remove from posts node
@@ -285,10 +422,12 @@ export function usePosts() {
           type: (item.type?.toLowerCase() === "found" ? "found" : "lost") as PostType,
           title: item.title || item.itemName || "Untitled Item",
           category: (item.category || "Other") as PostCategory,
+          subCategory: item.subCategory || undefined,
           description: item.description || "",
           location: item.location || "Unknown location",
           eventDate: item.eventDate || item.date || new Date().toISOString().split("T")[0],
           imageUrl: item.imageUrl || undefined,
+          imagePath: item.imagePath || undefined,
           status: (item.status?.toLowerCase() === "resolved"
             ? "resolved"
             : item.status?.toLowerCase() === "returned"
@@ -311,7 +450,8 @@ export function usePosts() {
           authorUsername: item.authorUsername || "community",
           type: (item.type?.toLowerCase() === "found" ? "found" : "lost") as PostType,
           title: item.itemName || "Untitled Item",
-          category: "Other",
+          category: item.category || "Other",
+          subCategory: item.subCategory || undefined,
           description: item.description || "",
           location: item.location || "Unknown location",
           eventDate: item.date || new Date().toISOString().split("T")[0],
@@ -330,8 +470,15 @@ export function usePosts() {
     }
   };
 
-  const getFilteredPosts = (filter: PostFilter, search: string) => {
+  const getFilteredPosts = (
+    filter: PostFilter,
+    search: string,
+    advanced?: AdvancedFilterOptions
+  ) => {
     const q = search.trim().toLowerCase();
+    const categoryKey = (value: string) => getCategoryConfig(value)?.key || normalizeCategoryKey(value);
+    const categoryKeys = new Set(advanced?.categories?.map(categoryKey));
+    const subcategoryKeys = new Set(advanced?.subcategories?.map(normalizeCategoryKey));
     return posts.value.filter((post) => {
       // Filter tab
       const matchesFilter =
@@ -343,10 +490,24 @@ export function usePosts() {
       // Search term
       const matchesSearch =
         !q ||
-        [post.title, post.description, post.location, post.category, post.authorName, post.authorUsername]
-          .some((text) => (text || "").toLowerCase().includes(q));
+        [
+          post.title,
+          post.description,
+          post.location,
+          post.category,
+          post.subCategory,
+          post.authorName,
+          post.authorUsername
+        ].some((text) => (text || "").toLowerCase().includes(q));
 
-      return matchesFilter && matchesSearch;
+      // Advanced Category Filters (Within group: OR)
+      const matchesCategories = categoryKeys.size === 0 || categoryKeys.has(categoryKey(post.category));
+
+      // Advanced Subcategory Filters (Within group: OR)
+      const matchesSubcategories = subcategoryKeys.size === 0 ||
+        Boolean(post.subCategory && subcategoryKeys.has(normalizeCategoryKey(post.subCategory)));
+
+      return matchesFilter && matchesSearch && matchesCategories && matchesSubcategories;
     });
   };
 

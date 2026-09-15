@@ -7,18 +7,34 @@
       </ion-refresher>
 
       <div class="ios-screen-container modern-container">
-        <!-- Minimal Social Header with Expandable Search -->
+        <!-- Minimal Social Header with Expandable Search and Filter Sheet -->
         <header class="home-top-bar">
           <div v-if="!isSearchActive" class="brand-bar-row">
             <h1 class="home-brand-title">Lost &amp; Found</h1>
-            <button
-              type="button"
-              class="search-toggle-btn"
-              aria-label="Search lost and found posts"
-              @click="openSearch"
-            >
-              <Search :size="22" />
-            </button>
+            <div class="header-actions-wrap">
+              <button
+                type="button"
+                class="header-icon-btn"
+                aria-label="Search lost and found posts"
+                @click="openSearch"
+              >
+                <Search :size="22" />
+              </button>
+              <button
+                type="button"
+                class="header-icon-btn filter-btn"
+                :class="{ active: hasActiveFilters }"
+                :aria-label="filterButtonLabel"
+                aria-haspopup="dialog"
+                :aria-expanded="showFilterSheet"
+                @click="showFilterSheet = true"
+              >
+                <SlidersHorizontal :size="20" />
+                <span v-if="hasActiveFilters" class="filter-active-count" aria-hidden="true">
+                  {{ activeFilterCount }}
+                </span>
+              </button>
+            </div>
           </div>
 
           <!-- Expanded Search Row -->
@@ -30,8 +46,23 @@
               type="search"
               class="search-input"
               placeholder="Search lost &amp; found posts..."
+              aria-label="Search lost and found posts"
               autocomplete="off"
             />
+            <button
+              type="button"
+              class="header-icon-btn filter-btn"
+              :class="{ active: hasActiveFilters }"
+              :aria-label="filterButtonLabel"
+              aria-haspopup="dialog"
+              :aria-expanded="showFilterSheet"
+              @click="showFilterSheet = true"
+            >
+              <SlidersHorizontal :size="20" />
+              <span v-if="hasActiveFilters" class="filter-active-count" aria-hidden="true">
+                {{ activeFilterCount }}
+              </span>
+            </button>
             <button
               type="button"
               class="close-search-btn"
@@ -43,6 +74,28 @@
           </div>
         </header>
 
+        <!-- Active Filter Removable Chips (Only shown when advanced filters are active) -->
+        <div v-if="activeChips.length > 0" class="active-filter-chips-row">
+          <button
+            v-for="chip in activeChips"
+            :key="chip.id"
+            type="button"
+            class="active-chip-pill"
+            :aria-label="`Remove ${chip.label} filter`"
+            @click="removeChip(chip)"
+          >
+            <span>{{ chip.label }}</span>
+            <X :size="12" class="chip-x-icon" />
+          </button>
+          <button
+            type="button"
+            class="clear-all-chips-btn"
+            @click="clearAllFilters"
+          >
+            Clear all
+          </button>
+        </div>
+
         <!-- Social Category Filter Pills -->
         <section class="categories-section" aria-label="Filter posts">
           <div class="compact-filter-row" role="tablist">
@@ -52,9 +105,9 @@
               type="button"
               role="tab"
               class="compact-filter-pill"
-              :class="{ active: activeFilter === tab.value }"
-              :aria-selected="activeFilter === tab.value"
-              @click="activeFilter = tab.value"
+              :class="{ active: appliedFilters.type === tab.value }"
+              :aria-selected="appliedFilters.type === tab.value"
+              @click="appliedFilters.type = tab.value"
             >
               <component :is="tab.icon" :size="15" class="pill-icon" />
               <span>{{ tab.label }}</span>
@@ -66,7 +119,7 @@
         <div class="feed-section-header">
           <div class="feed-title-block">
             <h2 class="feed-title">
-              {{ activeFilter === 'All' ? 'Recent Posts' : `${activeFilter} Posts` }}
+              {{ appliedFilters.type === 'All' ? 'Recent Posts' : `${appliedFilters.type} Posts` }}
             </h2>
             <span class="feed-pill-badge">
               {{ filteredPosts.length }}
@@ -106,6 +159,18 @@
           </button>
         </div>
 
+        <div
+          v-else-if="filteredPosts.length === 0 && hasActiveFilters"
+          class="feed-empty-state"
+        >
+          <SlidersHorizontal :size="32" />
+          <h3 class="empty-title">No matching posts</h3>
+          <p class="empty-sub">Try another category or clear your filters to see more posts.</p>
+          <button type="button" class="empty-action-btn" @click="clearAllFilters">
+            Clear Filters
+          </button>
+        </div>
+
         <!-- Empty State: Clean Feed (No logo on Home) -->
         <div
           v-else-if="filteredPosts.length === 0"
@@ -140,9 +205,17 @@
       </div>
     </ion-content>
 
+    <FilterSheetModal
+      :is-open="showFilterSheet"
+      :applied-filters="appliedFilters"
+      @close="showFilterSheet = false"
+      @apply="applyFilters"
+    />
+
     <!-- Create Post Modal when triggered from empty state -->
     <PostComposerModal
       :is-open="showComposer"
+      :publishing="publishingPost"
       initial-type="lost"
       @close="showComposer = false"
       @submit="handleDirectCreate"
@@ -151,8 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, nextTick, onMounted, ref, type Component } from "vue";
 import {
   IonContent,
   IonPage,
@@ -168,15 +240,18 @@ import {
   Search,
   X,
   AlertCircle,
-  Inbox
+  Inbox,
+  SlidersHorizontal
 } from "lucide-vue-next";
 import PostCard from "../components/PostCard.vue";
 import PostCardSkeleton from "../components/PostCardSkeleton.vue";
 import PostComposerModal from "../components/PostComposerModal.vue";
+import FilterSheetModal from "../components/FilterSheetModal.vue";
+import { useCategories } from "../composables/useCategories";
 import { usePosts } from "../composables/usePosts";
-import type { Post, PostFilter, PostFormData } from "../types/post";
+import { normalizeCategoryKey } from "../config/categories";
+import type { Post, PostFilter, PostFilters, PostFormData } from "../types/post";
 
-const router = useRouter();
 const {
   postsLoading,
   postsError,
@@ -186,17 +261,22 @@ const {
   isHelpfulByMe,
   createPost
 } = usePosts();
+const { getSubcategoriesForCategory } = useCategories();
 
 const searchQuery = ref("");
-const activeFilter = ref<PostFilter>("All");
+const showFilterSheet = ref(false);
+const appliedFilters = ref<PostFilters>({
+  type: "All",
+  categories: [],
+  subcategories: []
+});
 const isSearchActive = ref(false);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
-const openSearch = () => {
+const openSearch = async () => {
   isSearchActive.value = true;
-  setTimeout(() => {
-    searchInputRef.value?.focus();
-  }, 60);
+  await nextTick();
+  searchInputRef.value?.focus();
 };
 
 const closeSearch = () => {
@@ -207,7 +287,7 @@ const closeSearch = () => {
 interface FilterTabItem {
   value: PostFilter;
   label: string;
-  icon: any;
+  icon: Component;
 }
 
 const filterTabs: FilterTabItem[] = [
@@ -218,13 +298,77 @@ const filterTabs: FilterTabItem[] = [
 ];
 
 const showComposer = ref(false);
+const publishingPost = ref(false);
+
+interface FilterChip {
+  id: string;
+  group: "category" | "subcategory";
+  label: string;
+}
+
+const activeFilterCount = computed(() =>
+  (appliedFilters.value.type === "All" ? 0 : 1)
+  + appliedFilters.value.categories.length
+  + appliedFilters.value.subcategories.length
+);
+const hasActiveFilters = computed(() => activeFilterCount.value > 0);
+const filterButtonLabel = computed(() => hasActiveFilters.value
+  ? `Filter posts, ${activeFilterCount.value} active`
+  : "Filter posts"
+);
+
+const activeChips = computed<FilterChip[]>(() => [
+  ...appliedFilters.value.categories.map((label) => ({
+    id: `category:${normalizeCategoryKey(label)}`,
+    group: "category" as const,
+    label
+  })),
+  ...appliedFilters.value.subcategories.map((label) => ({
+    id: `subcategory:${normalizeCategoryKey(label)}`,
+    group: "subcategory" as const,
+    label
+  }))
+]);
+
+const removeChip = (chip: FilterChip) => {
+  const key = normalizeCategoryKey(chip.label);
+  if (chip.group === "subcategory") {
+    appliedFilters.value.subcategories = appliedFilters.value.subcategories.filter(
+      (name) => normalizeCategoryKey(name) !== key
+    );
+    return;
+  }
+
+  appliedFilters.value.categories = appliedFilters.value.categories.filter(
+    (name) => normalizeCategoryKey(name) !== key
+  );
+  const allowedSubcategories = new Set(
+    appliedFilters.value.categories.flatMap(getSubcategoriesForCategory).map(normalizeCategoryKey)
+  );
+  appliedFilters.value.subcategories = appliedFilters.value.subcategories.filter(
+    (name) => allowedSubcategories.has(normalizeCategoryKey(name))
+  );
+};
+
+const clearAllFilters = () => {
+  appliedFilters.value = { type: "All", categories: [], subcategories: [] };
+};
+
+const applyFilters = (filters: PostFilters) => {
+  appliedFilters.value = {
+    type: filters.type,
+    categories: [...filters.categories],
+    subcategories: [...filters.subcategories]
+  };
+  showFilterSheet.value = false;
+};
 
 onMounted(() => {
   subscribeToPosts();
 });
 
 const filteredPosts = computed(() => {
-  return getFilteredPosts(activeFilter.value, searchQuery.value);
+  return getFilteredPosts(appliedFilters.value.type, searchQuery.value, appliedFilters.value);
 });
 
 const handleRefresh = async (event: CustomEvent) => {
@@ -282,6 +426,8 @@ const openCreateComposer = () => {
 };
 
 const handleDirectCreate = async (data: PostFormData) => {
+  if (publishingPost.value) return;
+  publishingPost.value = true;
   try {
     await createPost(data);
     showComposer.value = false;
@@ -300,6 +446,8 @@ const handleDirectCreate = async (data: PostFormData) => {
       color: "danger"
     });
     await toast.present();
+  } finally {
+    publishingPost.value = false;
   }
 };
 </script>
@@ -344,23 +492,87 @@ const handleDirectCreate = async (data: PostFormData) => {
   line-height: 1.2;
 }
 
-.search-toggle-btn {
+.header-actions-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.header-icon-btn {
+  position: relative;
   width: 44px;
   height: 44px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: transparent;
   border: none;
   color: var(--app-text-primary);
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   cursor: pointer;
   padding: 0;
   transition: opacity 0.15s ease;
 }
 
-.search-toggle-btn:active {
+.header-icon-btn:active {
   opacity: 0.7;
+}
+
+.filter-btn.active {
+  color: var(--app-primary);
+  background: var(--app-primary-soft);
+}
+
+.filter-active-count {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--app-primary);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.active-filter-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.active-chip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-card-border);
+  border-radius: 16px;
+  background: var(--app-primary-soft);
+  color: var(--app-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip-x-icon {
+  flex-shrink: 0;
+}
+
+.clear-all-chips-btn {
+  padding: 6px;
+  border: none;
+  background: transparent;
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 /* Expanded Search Input Bar */
@@ -389,6 +601,7 @@ const handleDirectCreate = async (data: PostFormData) => {
 
 .search-input {
   flex: 1;
+  min-width: 0;
   background: transparent;
   border: none;
   font-size: 15px;
@@ -417,6 +630,15 @@ const handleDirectCreate = async (data: PostFormData) => {
 
 .close-search-btn:active {
   background: var(--app-surface-secondary);
+}
+
+.expanded-search-bar .header-icon-btn {
+  width: 34px;
+  height: 34px;
+}
+
+.close-search-btn {
+  flex-shrink: 0;
 }
 
 /* Categories / Social Filter Pills */

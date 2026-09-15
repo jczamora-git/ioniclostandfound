@@ -4,23 +4,41 @@
     :class="[`avatar-${size}`]"
     :aria-label="name"
   >
-    <span class="avatar-letter">{{ initial }}</span>
+    <img
+      v-if="avatarUrl && !imageError"
+      :src="avatarUrl"
+      :alt="name"
+      class="avatar-img"
+      @error="imageError = true"
+    />
+    <span v-else class="avatar-letter">{{ initial }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 const props = withDefaults(
   defineProps<{
     name?: string;
     username?: string;
+    avatarUrl?: string | null;
     size?: "sm" | "md" | "lg" | "xl";
   }>(),
   {
     name: "User",
     username: "",
+    avatarUrl: null,
     size: "md"
+  }
+);
+
+const imageError = ref(false);
+
+watch(
+  () => props.avatarUrl,
+  () => {
+    imageError.value = false;
   }
 );
 
@@ -42,7 +60,17 @@ const initial = computed(() => {
   font-weight: 700;
   flex-shrink: 0;
   user-select: none;
+  overflow: hidden;
+  position: relative;
   transition: transform 0.15s ease, background-color 0.2s ease;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
 }
 
 .avatar-sm {

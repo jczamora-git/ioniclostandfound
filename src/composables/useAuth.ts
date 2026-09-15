@@ -83,6 +83,8 @@ export function useAuth() {
           name: val.name || "",
           username: val.username || "",
           phone: val.phone || "",
+          avatarUrl: val.avatarUrl || null,
+          avatarPath: val.avatarPath || null,
           createdAt: val.createdAt || Date.now(),
           updatedAt: val.updatedAt || Date.now()
         };
@@ -145,6 +147,8 @@ export function useAuth() {
       name: data.name.trim(),
       username: cleanUsername,
       phone: data.phone.trim(),
+      avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : (currentProfile.value?.avatarUrl || null),
+      avatarPath: data.avatarPath !== undefined ? data.avatarPath : (currentProfile.value?.avatarPath || null),
       createdAt: currentProfile.value?.createdAt || now,
       updatedAt: now
     };
@@ -165,6 +169,8 @@ export function useAuth() {
       id: p.id,
       name: p.name,
       username: p.username,
+      avatarUrl: p.avatarUrl || null,
+      avatarPath: p.avatarPath || null,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt
     };

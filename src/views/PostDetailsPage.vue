@@ -22,15 +22,13 @@
             <ArrowLeft :size="22" />
           </button>
           <button
-            v-if="isOwner"
             type="button"
             class="header-more-btn"
             aria-label="Post options"
-            @click="showOwnerActionSheet = true"
+            @click="handleMoreOptions"
           >
             <MoreHorizontal :size="20" />
           </button>
-          <div v-else class="nav-placeholder"></div>
         </nav>
 
         <!-- Author Info Directly (No outer card) -->
@@ -39,7 +37,7 @@
             <UserAvatar :name="post.authorName" :username="post.authorUsername" size="md" />
             <div class="author-meta">
               <span class="author-name">{{ post.authorName }}</span>
-              <span class="author-sub">@{{ post.authorUsername }} · {{ relativeTime }}</span>
+              <span class="author-sub">{{ relativeTime }}</span>
             </div>
           </div>
 
@@ -180,6 +178,13 @@
       @did-dismiss="showOwnerActionSheet = false"
     />
 
+    <!-- General Post Action Sheet (Non-Owner) -->
+    <ion-action-sheet
+      :is-open="showGeneralActionSheet"
+      :buttons="generalActionButtons"
+      @did-dismiss="showGeneralActionSheet = false"
+    />
+
     <!-- Delete Confirmation IonAlert -->
     <ion-alert
       :is-open="showDeleteAlert"
@@ -242,12 +247,21 @@ const creatingChat = ref(false);
 const showDescription = computed(() => hasValidDescription(post.value?.description));
 
 const showOwnerActionSheet = ref(false);
+const showGeneralActionSheet = ref(false);
 const showDeleteAlert = ref(false);
 
 const isOwner = computed(() => {
   if (!post.value || !currentProfile.value) return false;
   return post.value.authorId === currentProfile.value.id;
 });
+
+const handleMoreOptions = () => {
+  if (isOwner.value) {
+    showOwnerActionSheet.value = true;
+  } else {
+    showGeneralActionSheet.value = true;
+  }
+};
 
 const handleMessagePoster = async () => {
   if (!post.value || isOwner.value || creatingChat.value) return;
@@ -449,6 +463,19 @@ const ownerActionButtons = computed(() => {
   return buttons;
 });
 
+const generalActionButtons = computed(() => [
+  {
+    text: "Share Post",
+    handler: () => {
+      handleShare();
+    }
+  },
+  {
+    text: "Cancel",
+    role: "cancel"
+  }
+]);
+
 const deleteAlertButtons = [
   {
     text: "Cancel",
@@ -516,22 +543,24 @@ const deleteAlertButtons = [
 }
 
 .details-container {
-  padding: 8px 16px 40px;
+  padding: 0 16px 36px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   max-width: 640px;
   margin: 0 auto;
   width: 100%;
 }
 
-/* Minimal Top Navigation */
+/* Minimal Top Navigation (44px compact) */
 .post-detail-top-nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 38px;
-  margin-bottom: 2px;
+  height: 44px;
+  min-height: 44px;
+  margin-bottom: 0;
+  padding: 0;
 }
 
 .back-nav-btn,
@@ -605,9 +634,9 @@ const deleteAlertButtons = [
 
 /* Title */
 .thread-title {
-  margin-top: 12px;
-  margin-bottom: 14px;
-  font-size: 23px;
+  margin-top: 8px;
+  margin-bottom: 12px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.3px;
   color: var(--app-text-primary);

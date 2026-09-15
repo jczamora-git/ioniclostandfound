@@ -1,23 +1,25 @@
+import { CATEGORY_NAMES } from "../config/categories";
+
 export type PostType = "lost" | "found";
 
 export type PostStatus = "open" | "resolved" | "returned";
 
 export type PostFilter = "All" | "Lost" | "Found" | "Resolved";
 
-export const POST_CATEGORIES = [
-  "ID / Cards",
-  "Wallet",
-  "Keys",
-  "Electronics",
-  "Bags",
-  "Clothing",
-  "Accessories",
-  "Documents",
-  "Pets",
-  "Other"
-] as const;
+export const POST_CATEGORIES = CATEGORY_NAMES;
 
-export type PostCategory = typeof POST_CATEGORIES[number];
+export type PostCategory = string;
+
+export interface AdvancedFilterOptions {
+  categories?: string[];
+  subcategories?: string[];
+}
+
+export interface PostFilters {
+  type: PostFilter;
+  categories: string[];
+  subcategories: string[];
+}
 
 export interface Post {
   id: string;
@@ -27,10 +29,12 @@ export interface Post {
   type: PostType;
   title: string;
   category: PostCategory;
+  subCategory?: string;
   description: string;
   location: string;
   eventDate: string;
-  imageUrl?: string;
+  imageUrl?: string | null;
+  imagePath?: string | null;
   status: PostStatus;
   helpfulCount?: number;
   commentsCount?: number;
@@ -42,10 +46,15 @@ export interface PostFormData {
   type: PostType;
   title: string;
   category: PostCategory;
+  subCategory?: string;
+  pendingSubcategory?: { category: string; name: string };
   description: string;
   location: string;
   eventDate: string;
-  imageUrl?: string;
+  imageUrl?: string | null;
+  imagePath?: string | null;
+  imageFile?: File | null;
+  removeImage?: boolean;
 }
 
 export type PostFormErrors = Partial<Record<keyof PostFormData, string>>;

@@ -10,6 +10,7 @@
           <UserAvatar
             :name="currentProfile?.name"
             :username="currentProfile?.username"
+            :avatar-url="currentProfile?.avatarUrl"
             size="xl"
           />
           <div class="hero-info">

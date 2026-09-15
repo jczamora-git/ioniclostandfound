@@ -21,6 +21,7 @@
           <UserAvatar
             :name="profile?.name || authorNameFallback"
             :username="profile?.username || authorUsernameFallback"
+            :avatar-url="profile?.avatarUrl"
             size="xl"
           />
           <div class="hero-info">
@@ -122,13 +123,14 @@ import PostCard from "../components/PostCard.vue";
 import { useAuth } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import type { Post } from "../types/post";
+import type { Profile } from "../types/profile";
 
 const route = useRoute();
 const { getPublicProfile } = useAuth();
 const { posts, toggleHelpful, isHelpfulByMe } = usePosts();
 
 const uid = computed(() => route.params.uid as string);
-const profile = ref<{ id: string; name: string; username: string } | null>(null);
+const profile = ref<Omit<Profile, "phone"> | null>(null);
 const loading = ref(true);
 const activeTab = ref<"Posts" | "Lost" | "Found">("Posts");
 
