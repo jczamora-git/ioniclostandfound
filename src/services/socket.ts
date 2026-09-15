@@ -8,9 +8,7 @@ const rawServerUrl =
 export const SERVER_URL: string =
   rawServerUrl && rawServerUrl.trim() !== ''
     ? rawServerUrl.trim().replace(/\/+$/, '')
-    : import.meta.env.DEV
-    ? 'http://localhost:3000'
-    : '';
+    : 'https://ioniclostandfound.vercel.app';
 
 if (import.meta.env.DEV) {
   console.log('[API Server Config]', SERVER_URL);

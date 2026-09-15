@@ -38,10 +38,11 @@ jobs:
 
 
       # ----------------------------------------------------------
-      # 4. Build Ionic/Vue application with Firebase
+      # 4. Build Ionic/Vue application with Firebase & API endpoint
       # ----------------------------------------------------------
       - name: Build Ionic application
         env:
+          VITE_API_SERVER_URL: https://ioniclostandfound.vercel.app
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
           VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}

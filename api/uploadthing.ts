@@ -91,13 +91,31 @@ const uploadRouteHandler = createRouteHandler({
   }
 });
 
-function handleCors(req: IncomingMessage, res: ServerResponse): boolean {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+const ALLOWED_ORIGINS = [
+  'https://ioniclostandfound.vercel.app',
+  'capacitor://localhost',
+  'http://localhost',
+  'https://localhost'
+];
+
+function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
+  const origin = (req.headers.origin as string) || '';
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || origin.startsWith('http://localhost:') || origin.startsWith('capacitor://'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'Content-Type, Authorization, x-uploadthing-version, x-uploadthing-package, x-auth-token, x-dev-uid'
   );
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
+
+function handleCors(req: IncomingMessage, res: ServerResponse): boolean {
+  setCorsHeaders(req, res);
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
@@ -213,10 +231,13 @@ export default async function handler(
       res.setHeader(key, val);
     });
 
+    setCorsHeaders(req, res);
+
     const resText = await webRes.text();
     return res.end(resText);
   } catch (err: any) {
     console.error('[UploadThing] Handler execution error:', err);
+    setCorsHeaders(req, res);
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
     return res.end(
