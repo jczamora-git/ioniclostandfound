@@ -17,6 +17,8 @@ interface ChatStorageData {
       id: string;
       name: string;
       username: string;
+      email?: string;
+      phone?: string;
       avatarUrl?: string | null;
     }
   >;
@@ -565,6 +567,8 @@ export async function saveUserProfile(profile: {
   id: string;
   name: string;
   username: string;
+  email?: string;
+  phone?: string;
   avatarUrl?: string | null;
 }): Promise<void> {
   if (!profile || !profile.id) return;
@@ -577,6 +581,20 @@ export async function saveUserProfile(profile: {
  */
 export async function getUserProfile(uid: string) {
   return store.profiles[uid] || null;
+}
+
+/**
+ * Search user profile by normalized username.
+ */
+export async function findProfileByUsername(rawUsername: string) {
+  const norm = rawUsername.trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9_.]/g, '');
+  if (!norm) return null;
+  for (const profile of Object.values(store.profiles)) {
+    if (profile.username && profile.username.trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9_.]/g, '') === norm) {
+      return profile;
+    }
+  }
+  return null;
 }
 
 /**

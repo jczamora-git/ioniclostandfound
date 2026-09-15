@@ -3,6 +3,7 @@ import { ref as dbRef, onValue, set, update } from 'firebase/database';
 import { db } from '../firebase';
 import { useAuth, sessionUid, getSessionUser } from './useAuth';
 import { useChatSocket } from './useChatSocket';
+import { getChatServerUrl } from '../services/socket';
 import type { AppNotification } from '../types/notification';
 
 const notifications = ref<AppNotification[]>([]);
@@ -84,17 +85,19 @@ export function useNotifications() {
 
     // 2. Fallback to REST endpoint
     try {
-      const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
-      const res = await fetch(`${SERVER_URL}/api/notifications/${myUid}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.notifications)) {
-          data.notifications.forEach((notif: AppNotification) => {
-            if (!notifications.value.some((n) => n.id === notif.id)) {
-              notifications.value.push(notif);
-            }
-          });
-          sortNotifications();
+      const serverUrl = getChatServerUrl();
+      if (serverUrl) {
+        const res = await fetch(`${serverUrl}/api/notifications/${myUid}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.notifications)) {
+            data.notifications.forEach((notif: AppNotification) => {
+              if (!notifications.value.some((n) => n.id === notif.id)) {
+                notifications.value.push(notif);
+              }
+            });
+            sortNotifications();
+          }
         }
       }
     } catch {}
@@ -159,10 +162,12 @@ export function useNotifications() {
 
       // Fallback REST
       try {
-        const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
-        fetch(`${SERVER_URL}/api/notifications/${myUid}/read/${notificationId}`, {
-          method: 'POST'
-        }).catch(() => {});
+        const serverUrl = getChatServerUrl();
+        if (serverUrl) {
+          fetch(`${serverUrl}/api/notifications/${myUid}/read/${notificationId}`, {
+            method: 'POST'
+          }).catch(() => {});
+        }
       } catch {}
     }
   };
@@ -194,10 +199,12 @@ export function useNotifications() {
 
       // Fallback REST
       try {
-        const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
-        fetch(`${SERVER_URL}/api/notifications/${myUid}/read-all`, {
-          method: 'POST'
-        }).catch(() => {});
+        const serverUrl = getChatServerUrl();
+        if (serverUrl) {
+          fetch(`${serverUrl}/api/notifications/${myUid}/read-all`, {
+            method: 'POST'
+          }).catch(() => {});
+        }
       } catch {}
     }
   };
@@ -257,6 +264,57 @@ export function useNotifications() {
     }
   };
 
+  /**
+   * Create and deliver a community merit notification to the helper.
+   */
+  const createMeritNotification = async (params: {
+    recipientId: string;
+    postId: string;
+    postTitle?: string;
+    awardedByName: string;
+  }) => {
+    const session = await getSessionUser();
+    const currentUid = session?.uid || currentProfile.value?.id;
+    if (!currentUid) return;
+
+    if (params.recipientId === currentUid) {
+      return;
+    }
+
+    const notifId = `notif_merit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const notification: AppNotification = {
+      id: notifId,
+      type: 'merit_awarded',
+      actorId: currentUid,
+      actorName: params.awardedByName || currentProfile.value?.name || 'A community member',
+      actorUsername: currentProfile.value?.username || session?.username || 'user',
+      actorAvatarUrl: currentProfile.value?.avatarUrl || null,
+      postId: params.postId,
+      postTitle: params.postTitle,
+      text: `${params.awardedByName} awarded you a Community Merit for helping recover ${params.postTitle || 'this item'}.`,
+      createdAt: Date.now(),
+      read: false
+    };
+
+    // 1. Try Firebase RTDB
+    try {
+      await set(dbRef(db, `notifications/${params.recipientId}/${notifId}`), notification);
+    } catch (err) {
+      // Silently continue to socket/REST delivery
+    }
+
+    // 2. Deliver via real-time Socket to target user room
+    try {
+      const socket = await initSocket();
+      socket.emit('notification:send', {
+        targetUserId: params.recipientId,
+        notification
+      });
+    } catch (err) {
+      console.warn('[useNotifications] Failed to emit merit notification via socket:', err);
+    }
+  };
+
   return {
     notifications,
     loading,
@@ -264,6 +322,7 @@ export function useNotifications() {
     subscribeToNotifications,
     markAsRead,
     markAllAsRead,
-    createCommentNotification
+    createCommentNotification,
+    createMeritNotification
   };
 }

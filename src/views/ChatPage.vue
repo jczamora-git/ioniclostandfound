@@ -50,9 +50,23 @@
           </div>
         </div>
 
-        <!-- Post Context Bar (Only shown when active thread is post-based) -->
+        <!-- Post Context Bar Loading Skeleton -->
+        <div
+          v-if="activeThread?.type === 'post' && isPostContextLoading"
+          class="post-context-skeleton-bar"
+        >
+          <div class="context-thumb-skeleton-box">
+            <ion-skeleton-text :animated="true" class="context-thumb-skeleton" />
+          </div>
+          <div class="context-info-skeleton">
+            <ion-skeleton-text :animated="true" class="context-title-skeleton" />
+            <ion-skeleton-text :animated="true" class="context-sub-skeleton" />
+          </div>
+        </div>
+
+        <!-- Post Context Bar (When active thread is post-based and loaded) -->
         <PostChatContext
-          v-if="activeThread?.type === 'post' && post"
+          v-else-if="activeThread?.type === 'post' && post"
           :post="post"
         />
 
@@ -64,11 +78,26 @@
 
         <!-- Message History List -->
         <div ref="scrollContainerRef" class="chat-messages-scroll">
-          <div v-if="loading" class="chat-loading">
-            <ion-spinner name="crescent" />
-            <span>Loading messages...</span>
+          <!-- 1. SKELETON LOADING STATE (left/right alternating bubble skeletons) -->
+          <div v-if="isMessagesLoading" class="chat-skeleton-stream" aria-label="Loading messages">
+            <div class="skeleton-bubble-row left">
+              <ion-skeleton-text :animated="true" class="skeleton-bubble bubble-w60 left-bubble" />
+            </div>
+            <div class="skeleton-bubble-row right">
+              <ion-skeleton-text :animated="true" class="skeleton-bubble bubble-w45 right-bubble" />
+            </div>
+            <div class="skeleton-bubble-row left">
+              <ion-skeleton-text :animated="true" class="skeleton-bubble bubble-w75 left-bubble" />
+            </div>
+            <div class="skeleton-bubble-row right">
+              <ion-skeleton-text :animated="true" class="skeleton-bubble bubble-w55 right-bubble" />
+            </div>
+            <div class="skeleton-bubble-row left">
+              <ion-skeleton-text :animated="true" class="skeleton-bubble bubble-w40 left-bubble" />
+            </div>
           </div>
 
+          <!-- 2. EMPTY STATE -->
           <div v-else-if="messages.length === 0" class="chat-empty-thread">
             <p class="empty-thread-title">No messages in this thread yet.</p>
             <p class="empty-thread-sub">
@@ -80,6 +109,7 @@
             </p>
           </div>
 
+          <!-- 3. REAL MESSAGES STREAM -->
           <template v-else>
             <MessageBubble
               v-for="msg in messages"
@@ -116,7 +146,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { IonPage, IonContent, IonSpinner } from '@ionic/vue';
+import { IonPage, IonContent, IonSkeletonText } from '@ionic/vue';
 import { ShieldAlert } from 'lucide-vue-next';
 import PageHeader from '../components/PageHeader.vue';
 import UserAvatar from '../components/UserAvatar.vue';
@@ -127,6 +157,7 @@ import { useChat } from '../composables/useChat';
 import { useConversations } from '../composables/useConversations';
 import { useAuth, sessionUid } from '../composables/useAuth';
 import { usePosts } from '../composables/usePosts';
+import { getChatServerUrl } from '../services/socket';
 import { ref as dbRef, get } from 'firebase/database';
 import { db } from '../firebase';
 import type { Post } from '../types/post';
@@ -147,7 +178,7 @@ const {
   threads,
   activeThreadId,
   activeThread,
-  loading,
+  isMessagesLoading,
   isOtherTyping,
   loadThreads,
   loadHistory,
@@ -159,6 +190,7 @@ const {
 } = useChat(conversationId.value, initialThreadQuery.value);
 
 const post = ref<Post | null>(null);
+const isPostContextLoading = ref(false);
 const otherParticipant = ref<Profile | null>(null);
 const sending = ref(false);
 const scrollContainerRef = ref<HTMLDivElement | null>(null);
@@ -198,9 +230,15 @@ watch(
 const syncPostContext = async (thread?: ConversationThread) => {
   const current = thread || activeThread.value;
   if (current?.type === 'post' && current.postId) {
-    post.value = await getPostById(current.postId);
+    isPostContextLoading.value = true;
+    try {
+      post.value = await getPostById(current.postId);
+    } finally {
+      isPostContextLoading.value = false;
+    }
   } else {
     post.value = null;
+    isPostContextLoading.value = false;
   }
 };
 
@@ -223,11 +261,13 @@ onMounted(async () => {
       if (!convData) {
         // Fallback to server REST endpoint
         try {
-          const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
-          const res = await fetch(`${SERVER_URL}/api/conversations/${myUid}`);
-          if (res.ok) {
-            const json = await res.json();
-            convData = (json.conversations || []).find((c: any) => c.id === conversationId.value);
+          const serverUrl = getChatServerUrl();
+          if (serverUrl && myUid) {
+            const res = await fetch(`${serverUrl}/api/conversations/${myUid}`);
+            if (res.ok) {
+              const json = await res.json();
+              convData = (json.conversations || []).find((c: any) => c.id === conversationId.value);
+            }
           }
         } catch {}
 
@@ -288,7 +328,9 @@ onMounted(async () => {
       };
     }
   } catch (err) {
-    console.error('Failed to load conversation details:', err);
+    if (import.meta.env.DEV) {
+      console.error('Failed to load conversation details:', err);
+    }
   }
 
   // 2. Load threads
@@ -328,7 +370,9 @@ const handleSendMessage = async (text: string) => {
   try {
     await sendText(text);
   } catch (err: any) {
-    console.error('Error sending message:', err);
+    if (import.meta.env.DEV) {
+      console.error('Error sending message:', err);
+    }
   } finally {
     sending.value = false;
   }
@@ -459,6 +503,54 @@ const handleOpenProfile = () => {
   color: var(--app-primary, #2f9fe8);
 }
 
+/* Post Context Bar Skeleton */
+.post-context-skeleton-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background-color: var(--app-surface-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--app-card-border);
+  margin: 8px 16px 12px;
+}
+
+.context-thumb-skeleton-box {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.context-thumb-skeleton {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+.context-info-skeleton {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.context-title-skeleton {
+  width: 50%;
+  height: 14px;
+  border-radius: 4px;
+  margin: 0;
+}
+
+.context-sub-skeleton {
+  width: 75%;
+  height: 11px;
+  border-radius: 4px;
+  margin: 0;
+}
+
 /* Meetup Safety Banner */
 .safety-tip-bar {
   display: flex;
@@ -486,16 +578,45 @@ const handleOpenProfile = () => {
   flex-direction: column;
 }
 
-.chat-loading {
+/* Chat Message Skeleton Stream */
+.chat-skeleton-stream {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 0;
-  gap: 8px;
-  color: var(--app-text-secondary);
-  font-size: 13px;
+  gap: 12px;
+  padding: 12px 0;
 }
+
+.skeleton-bubble-row {
+  display: flex;
+  width: 100%;
+}
+
+.skeleton-bubble-row.left {
+  justify-content: flex-start;
+}
+
+.skeleton-bubble-row.right {
+  justify-content: flex-end;
+}
+
+.skeleton-bubble {
+  height: 42px;
+  margin: 0;
+}
+
+.left-bubble {
+  border-radius: 18px 18px 18px 4px;
+}
+
+.right-bubble {
+  border-radius: 18px 18px 4px 18px;
+}
+
+.bubble-w40 { width: 40%; }
+.bubble-w45 { width: 45%; }
+.bubble-w55 { width: 55%; }
+.bubble-w60 { width: 60%; }
+.bubble-w75 { width: 75%; }
 
 .chat-empty-thread {
   text-align: center;

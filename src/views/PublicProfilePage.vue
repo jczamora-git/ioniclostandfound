@@ -65,6 +65,13 @@
           </button>
         </header>
 
+        <!-- Achievements Section -->
+        <AchievementsSection
+          v-if="uid"
+          :user-id="uid"
+          :is-own-profile="isOwnProfile"
+        />
+
         <!-- Member Posts Section Header & Filter Pills -->
         <section class="posts-heading-section">
           <div class="heading-row">
@@ -130,6 +137,7 @@ import {
 import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
 import PageHeader from "../components/PageHeader.vue";
+import AchievementsSection from "../components/AchievementsSection.vue";
 import { auth } from "../firebase";
 import { useAuth, getSessionUser, sessionUid } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";

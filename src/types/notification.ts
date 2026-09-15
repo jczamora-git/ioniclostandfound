@@ -1,6 +1,6 @@
 export interface AppNotification {
   id: string;
-  type: 'comment' | 'reply';
+  type: 'comment' | 'reply' | 'merit_awarded';
   actorId: string;
   actorName: string;
   actorUsername?: string;

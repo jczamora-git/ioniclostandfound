@@ -10,6 +10,7 @@ import {
 } from "firebase/database";
 import { db } from "../firebase";
 import { useAuth } from "./useAuth";
+import { useImageUpload } from "./useImageUpload";
 import type {
   Post,
   PostCategory,
@@ -78,6 +79,7 @@ const savePostWithSubcategory = async (
 
 export function usePosts() {
   const { currentProfile, currentUser } = useAuth();
+  const { uploadPostImage, deleteUploadedFile } = useImageUpload();
 
   const subscribeToPosts = () => {
     if (isSubscribed) return;
@@ -105,6 +107,7 @@ export function usePosts() {
               location: item.location || "Unknown location",
               eventDate: item.eventDate || item.date || new Date().toISOString().split("T")[0],
               imageUrl: item.imageUrl || undefined,
+              imageKey: item.imageKey || undefined,
               imagePath: item.imagePath || undefined,
               status: (item.status?.toLowerCase() === "resolved"
                 ? "resolved"
@@ -140,6 +143,7 @@ export function usePosts() {
                   location: item.location || "Unknown location",
                   eventDate: item.date || new Date().toISOString().split("T")[0],
                   imageUrl: undefined,
+                  imageKey: undefined,
                   status: (item.status === "Claimed" ? "resolved" : "open") as PostStatus,
                   helpfulCount: 0,
                   commentsCount: 0,
@@ -188,14 +192,22 @@ export function usePosts() {
       throw new Error("You must complete your profile first.");
     }
 
+    let finalImageUrl: string | null = null;
+    let finalImageKey: string | null = null;
+
+    if (data.imageFile) {
+      const uploadRes = await uploadPostImage(data.imageFile);
+      finalImageUrl = uploadRes.url;
+      finalImageKey = uploadRes.key;
+    } else if (data.imageUrl && !data.imageUrl.startsWith("blob:")) {
+      finalImageUrl = data.imageUrl.trim();
+      finalImageKey = data.imageKey || null;
+    }
+
     const postsNode = dbRef(db, "posts");
     const newPostRef = push(postsNode);
     const postId = newPostRef.key!;
     const now = Date.now();
-
-    // Never save local blob: URLs to database
-    const validRemoteImageUrl =
-      data.imageUrl && !data.imageUrl.startsWith("blob:") ? data.imageUrl.trim() : null;
 
     const newPost: Omit<Post, "id"> = {
       authorId: currentProfile.value.id,
@@ -208,7 +220,7 @@ export function usePosts() {
       description: data.description.trim(),
       location: data.location.trim(),
       eventDate: data.eventDate,
-      ...(validRemoteImageUrl ? { imageUrl: validRemoteImageUrl } : {}),
+      ...(finalImageUrl ? { imageUrl: finalImageUrl, imageKey: finalImageKey } : {}),
       status: "open",
       helpfulCount: 0,
       commentsCount: 0,
@@ -253,9 +265,12 @@ export function usePosts() {
 
     if (data.removeImage) {
       updates.imageUrl = null;
+      updates.imageKey = null;
       updates.imagePath = null;
     } else if (data.imageUrl !== undefined && !data.imageUrl?.startsWith("blob:")) {
       updates.imageUrl = data.imageUrl?.trim() || null;
+      updates.imageKey = data.imageKey || null;
+      updates.imagePath = null;
     }
 
     const pending = await resolvePendingSubcategory(
@@ -278,7 +293,7 @@ export function usePosts() {
     }
   };
 
-  const resolvePost = async (postId: string, status: "resolved" | "returned" = "resolved") => {
+  const resolvePost = async (postId: string, status: PostStatus = "resolved") => {
     if (!currentProfile.value) {
       throw new Error("You must be logged in.");
     }
@@ -298,10 +313,15 @@ export function usePosts() {
     if (!currentProfile.value) {
       throw new Error("You must be logged in.");
     }
-    const post = posts.value.find((p) => p.id === postId);
+    const post = posts.value.find((p) => p.id === postId) || await getPostById(postId);
     if (!post) throw new Error("Post not found.");
     if (post.authorId !== currentProfile.value.id) {
       throw new Error("You can only delete your own posts.");
+    }
+
+    // Delete image from UploadThing if imageKey exists
+    if (post.imageKey) {
+      deleteUploadedFile(post.imageKey).catch(() => {});
     }
 
     // Remove from posts node
@@ -381,6 +401,7 @@ export function usePosts() {
           location: item.location || "Unknown location",
           eventDate: item.eventDate || item.date || new Date().toISOString().split("T")[0],
           imageUrl: item.imageUrl || undefined,
+          imageKey: item.imageKey || undefined,
           imagePath: item.imagePath || undefined,
           status: (item.status?.toLowerCase() === "resolved"
             ? "resolved"
@@ -410,6 +431,7 @@ export function usePosts() {
           location: item.location || "Unknown location",
           eventDate: item.date || new Date().toISOString().split("T")[0],
           imageUrl: undefined,
+          imageKey: undefined,
           status: (item.status === "Claimed" ? "resolved" : "open") as PostStatus,
           helpfulCount: 0,
           commentsCount: 0,

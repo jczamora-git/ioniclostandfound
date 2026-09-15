@@ -2,6 +2,7 @@ import { ref, computed } from 'vue';
 import { useChatSocket, onMessageNew, onThreadUpdated } from './useChatSocket';
 import { useConversations } from './useConversations';
 import { useAuth } from './useAuth';
+import { getChatServerUrl } from '../services/socket';
 import type { ChatMessage } from '../types/message';
 import type { ConversationThread } from '../types/conversation';
 
@@ -24,7 +25,7 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
   const activeThreadId = ref<string>(initialThreadId || 'general');
   const threads = ref<ConversationThread[]>([]);
   const messages = ref<ChatMessage[]>([]);
-  const loading = ref(true);
+  const isMessagesLoading = ref(true);
   const isOtherTyping = ref(false);
 
   let typingTimer: any = null;
@@ -57,11 +58,13 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
       try {
         list = await getThreads(conversationId);
       } catch {
-        const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
-        const res = await fetch(`${SERVER_URL}/api/conversations/${conversationId}/threads`);
-        if (res.ok) {
-          const data = await res.json();
-          list = data.threads || [];
+        const serverUrl = getChatServerUrl();
+        if (serverUrl) {
+          const res = await fetch(`${serverUrl}/api/conversations/${conversationId}/threads`);
+          if (res.ok) {
+            const data = await res.json();
+            list = data.threads || [];
+          }
         }
       }
 
@@ -79,13 +82,15 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
 
       threads.value = list;
     } catch (err) {
-      console.warn('[useChat] Failed to load threads:', err);
+      if (import.meta.env.DEV) {
+        console.warn('[useChat] Failed to load threads:', err);
+      }
     }
   };
 
   const loadHistory = async (targetThreadId?: string) => {
     const threadToLoad = targetThreadId || activeThreadId.value || 'general';
-    loading.value = true;
+    isMessagesLoading.value = true;
     messageMap.clear();
     messages.value = [];
 
@@ -95,11 +100,13 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
         history = await getConversationMessages(conversationId, threadToLoad);
       } catch {
         // Fallback to REST API
-        const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
-        const res = await fetch(`${SERVER_URL}/api/messages/${conversationId}/${threadToLoad}`);
-        if (res.ok) {
-          const data = await res.json();
-          history = data.messages || [];
+        const serverUrl = getChatServerUrl();
+        if (serverUrl) {
+          const res = await fetch(`${serverUrl}/api/messages/${conversationId}/${threadToLoad}`);
+          if (res.ok) {
+            const data = await res.json();
+            history = data.messages || [];
+          }
         }
       }
 
@@ -110,9 +117,11 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
       });
       sortAndSyncMessages();
     } catch (err) {
-      console.error('[useChat] Failed to load message history:', err);
+      if (import.meta.env.DEV) {
+        console.error('[useChat] Failed to load message history:', err);
+      }
     } finally {
-      loading.value = false;
+      isMessagesLoading.value = false;
     }
   };
 
@@ -213,7 +222,9 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
         }
       );
     } catch (err) {
-      console.warn('[useChat] Socket listener setup warning:', err);
+      if (import.meta.env.DEV) {
+        console.warn('[useChat] Socket listener setup warning:', err);
+      }
     }
   };
 
@@ -258,7 +269,8 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
     threads,
     activeThreadId,
     activeThread,
-    loading,
+    loading: isMessagesLoading,
+    isMessagesLoading,
     isOtherTyping,
     loadThreads,
     loadHistory,

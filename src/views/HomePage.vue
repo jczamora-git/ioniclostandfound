@@ -245,7 +245,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, type Component } from "vue";
+import { computed, nextTick, onMounted, ref, watchEffect, type Component } from "vue";
 import {
   IonContent,
   IonPage,
@@ -273,6 +273,7 @@ import NotificationsModal from "../components/NotificationsModal.vue";
 import { useCategories } from "../composables/useCategories";
 import { usePosts } from "../composables/usePosts";
 import { useNotifications } from "../composables/useNotifications";
+import { useProfiles } from "../composables/useProfiles";
 import { normalizeCategoryKey } from "../config/categories";
 import type { Post, PostFilter, PostFilters, PostFormData } from "../types/post";
 
@@ -285,6 +286,7 @@ const {
   isHelpfulByMe,
   createPost
 } = usePosts();
+const { loadProfiles } = useProfiles();
 const { getSubcategoriesForCategory } = useCategories();
 const { unreadCount } = useNotifications();
 
@@ -402,6 +404,12 @@ onMounted(() => {
 
 const filteredPosts = computed(() => {
   return getFilteredPosts(appliedFilters.value.type, searchQuery.value, appliedFilters.value);
+});
+
+watchEffect(() => {
+  if (filteredPosts.value && filteredPosts.value.length > 0) {
+    loadProfiles(filteredPosts.value.map((p) => p.authorId));
+  }
 });
 
 const handleRefresh = async (event: CustomEvent) => {

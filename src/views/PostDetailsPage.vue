@@ -34,9 +34,14 @@
         <!-- Author Info Directly (No outer card) -->
         <div class="thread-author-row">
           <div class="author-left" @click="goToAuthorProfile">
-            <UserAvatar :name="post.authorName" :username="post.authorUsername" size="md" />
+            <UserAvatar
+              :name="authorName"
+              :username="authorUsername"
+              :avatar-url="authorAvatarUrl"
+              size="md"
+            />
             <div class="author-meta">
-              <span class="author-name">{{ post.authorName }}</span>
+              <span class="author-name">{{ authorName }}</span>
               <span class="author-sub">{{ relativeTime }}</span>
             </div>
           </div>
@@ -100,6 +105,31 @@
             <span class="meta-val status-val" :class="post.status">
               {{ post.status.toUpperCase() }}
             </span>
+          </div>
+        </div>
+
+        <!-- Credited Community Merit Helper Card -->
+        <div v-if="creditedHelper" class="thread-merit-card" @click="goToHelperProfile">
+          <div class="merit-badge-icon-box">
+            <Award :size="20" class="merit-award-icon" />
+          </div>
+          <div class="merit-card-content">
+            <span class="merit-card-label">Recovered with help from</span>
+            <div class="merit-helper-row">
+              <UserAvatar
+                :name="creditedHelper.name"
+                :username="creditedHelper.username"
+                :avatar-url="creditedHelper.avatarUrl"
+                size="sm"
+              />
+              <div class="merit-helper-meta">
+                <span class="helper-name-text">{{ creditedHelper.name }}</span>
+                <span class="helper-handle-text">@{{ creditedHelper.username }}</span>
+              </div>
+              <button type="button" class="view-helper-btn" @click.stop="goToHelperProfile">
+                View Profile
+              </button>
+            </div>
           </div>
         </div>
 
@@ -193,11 +223,22 @@
       :buttons="deleteAlertButtons"
       @did-dismiss="showDeleteAlert = false"
     />
+
+    <!-- Resolve Post Modal (With community helper credit option) -->
+    <ResolvePostModal
+      v-if="post"
+      :is-open="showResolveModal"
+      :post="post"
+      :comments="comments"
+      :resolving="resolvingPost"
+      @close="showResolveModal = false"
+      @confirm="handleResolveConfirm"
+    />
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   IonAlert,
@@ -219,16 +260,20 @@ import {
   Heart,
   Share2,
   MessageCircle,
-  SendHorizontal
+  SendHorizontal,
+  Award
 } from "lucide-vue-next";
 import UserAvatar from "../components/UserAvatar.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import CommentList from "../components/CommentList.vue";
 import CommentComposer from "../components/CommentComposer.vue";
+import ResolvePostModal from "../components/ResolvePostModal.vue";
 import { auth } from "../firebase";
 import { useAuth, getSessionUser, sessionUid } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useComments } from "../composables/useComments";
+import { useProfiles } from "../composables/useProfiles";
+import { useAchievements } from "../composables/useAchievements";
 import { createOrGetConversation } from "../composables/useConversations";
 import { hasValidDescription, type Post } from "../types/post";
 
@@ -237,12 +282,56 @@ const router = useRouter();
 const { currentProfile } = useAuth();
 const { getPostById, deletePost, resolvePost, toggleHelpful, isHelpfulByMe } = usePosts();
 const { comments, commentsLoading, subscribeToComments, stopCommentsSubscription, addComment, deleteComment } = useComments();
+const { getProfile, loadProfile } = useProfiles();
+const { awardMeritAndResolvePost } = useAchievements();
 
 const postId = computed(() => route.params.id as string);
 const post = ref<Post | null>(null);
 const loading = ref(true);
 const imageFailed = ref(false);
 const creatingChat = ref(false);
+const showResolveModal = ref(false);
+const resolvingPost = ref(false);
+
+watchEffect(() => {
+  if (post.value?.authorId) {
+    loadProfile(post.value.authorId);
+  }
+  if (post.value?.meritRecipientId) {
+    loadProfile(post.value.meritRecipientId);
+  }
+});
+
+const authorProfile = computed(() => getProfile(post.value?.authorId));
+
+const authorName = computed(() => {
+  return authorProfile.value?.name || post.value?.authorName || "Community Member";
+});
+
+const authorUsername = computed(() => {
+  return authorProfile.value?.username || post.value?.authorUsername || "member";
+});
+
+const authorAvatarUrl = computed(() => {
+  return authorProfile.value?.avatarUrl || null;
+});
+
+const creditedHelper = computed(() => {
+  if (!post.value?.meritRecipientId) return null;
+  const p = getProfile(post.value.meritRecipientId);
+  return {
+    id: post.value.meritRecipientId,
+    name: p?.name || "Community Member",
+    username: p?.username || "member",
+    avatarUrl: p?.avatarUrl || null
+  };
+});
+
+const goToHelperProfile = () => {
+  if (post.value?.meritRecipientId) {
+    router.push(`/profile/${post.value.meritRecipientId}`);
+  }
+};
 
 const showDescription = computed(() => hasValidDescription(post.value?.description));
 
@@ -483,20 +572,19 @@ const ownerActionButtons = computed(() => {
         ? "Mark as Returned / Resolved"
         : "Mark as Found / Resolved",
       handler: async () => {
-        const nextStatus = isResolved
-          ? "open"
-          : post.value?.type === "found"
-          ? "returned"
-          : "resolved";
-        await resolvePost(post.value!.id, nextStatus as any);
-        post.value!.status = nextStatus as any;
-        const toast = await toastController.create({
-          message: isResolved ? "Post re-opened." : "Post marked as resolved! 🎉",
-          duration: 2500,
-          position: "top",
-          color: "success"
-        });
-        await toast.present();
+        if (isResolved) {
+          await resolvePost(post.value!.id, "open");
+          post.value!.status = "open";
+          const toast = await toastController.create({
+            message: "Post re-opened.",
+            duration: 2500,
+            position: "top",
+            color: "success"
+          });
+          await toast.present();
+        } else {
+          showResolveModal.value = true;
+        }
       }
     },
     {
@@ -514,6 +602,45 @@ const ownerActionButtons = computed(() => {
 
   return buttons;
 });
+
+const handleResolveConfirm = async (recipientId: string | null) => {
+  if (!post.value || resolvingPost.value) return;
+  resolvingPost.value = true;
+  try {
+    await awardMeritAndResolvePost({
+      postId: post.value.id,
+      postTitle: post.value.title,
+      postType: post.value.type,
+      postAuthorId: post.value.authorId,
+      recipientId
+    });
+    const nextStatus = post.value.type === "found" ? "returned" : "resolved";
+    post.value.status = nextStatus;
+    if (recipientId) {
+      post.value.meritRecipientId = recipientId;
+    }
+    showResolveModal.value = false;
+    const toast = await toastController.create({
+      message: recipientId
+        ? "Post marked as resolved and Community Merit awarded! 🏅"
+        : "Post marked as resolved! 🎉",
+      duration: 2500,
+      position: "top",
+      color: "success"
+    });
+    await toast.present();
+  } catch (err: any) {
+    const toast = await toastController.create({
+      message: err.message || "Failed to resolve post.",
+      duration: 3000,
+      position: "top",
+      color: "danger"
+    });
+    await toast.present();
+  } finally {
+    resolvingPost.value = false;
+  }
+};
 
 const generalActionButtons = computed(() => [
   {
@@ -869,5 +996,86 @@ const deleteAlertButtons = [
 .details-comments-section {
   display: flex;
   flex-direction: column;
+}
+
+/* Credited Community Helper Card */
+.thread-merit-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.6) 0%, rgba(221, 243, 255, 0.6) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 4px 0 2px;
+  cursor: pointer;
+}
+
+.merit-badge-icon-box {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #d97706;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.merit-card-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.merit-card-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #b45309;
+}
+
+.merit-helper-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.merit-helper-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.helper-name-text {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.helper-handle-text {
+  font-size: 12px;
+  color: var(--app-text-secondary);
+}
+
+.view-helper-btn {
+  background: var(--app-surface, #ffffff);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-helper-btn:hover {
+  background: #fef3c7;
 }
 </style>

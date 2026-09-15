@@ -3,10 +3,15 @@
     <!-- Header: Author, Username, Time, Type Badge -->
     <header class="card-header">
       <div class="author-block" @click.stop="handleAuthorClick">
-        <UserAvatar :name="post.authorName" :username="post.authorUsername" size="md" />
+        <UserAvatar
+          :name="authorName"
+          :username="authorUsername"
+          :avatar-url="authorAvatarUrl"
+          size="md"
+        />
         <div class="author-meta">
           <div class="author-name-row">
-            <span class="author-name">{{ post.authorName }}</span>
+            <span class="author-name">{{ authorName }}</span>
             <span class="author-dot">·</span>
             <time class="relative-time">{{ relativeTime }}</time>
           </div>
@@ -53,6 +58,16 @@
           {{ formattedDate }}
         </span>
       </template>
+    </div>
+
+    <!-- Credited Community Merit Helper -->
+    <div
+      v-if="creditedHelper"
+      class="post-credited-helper-row"
+      @click.stop="handleHelperClick"
+    >
+      <Award :size="13" class="merit-credit-icon" />
+      <span>Resolved with help from <strong class="helper-link-name">{{ creditedHelper.name }}</strong></span>
     </div>
 
     <!-- Footer Actions: Helpful, Comment, Share -->
@@ -117,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import {
   Tag,
@@ -125,12 +140,14 @@ import {
   CalendarDays,
   Heart,
   MessageCircle,
-  Share2
+  Share2,
+  Award
 } from "lucide-vue-next";
 import UserAvatar from "./UserAvatar.vue";
 import StatusBadge from "./StatusBadge.vue";
 import { hasValidDescription, type Post } from "../types/post";
 import { useLatestComment } from "../composables/useLatestComment";
+import { useProfiles } from "../composables/useProfiles";
 
 const props = defineProps<{
   post: Post;
@@ -144,6 +161,47 @@ defineEmits<{
 
 const router = useRouter();
 const imageFailed = ref(false);
+
+const { getProfile, loadProfile } = useProfiles();
+
+watchEffect(() => {
+  if (props.post.authorId) {
+    loadProfile(props.post.authorId);
+  }
+  if (props.post.meritRecipientId) {
+    loadProfile(props.post.meritRecipientId);
+  }
+});
+
+const authorProfile = computed(() => getProfile(props.post.authorId));
+
+const authorName = computed(() => {
+  return authorProfile.value?.name || props.post.authorName || "Community Member";
+});
+
+const authorUsername = computed(() => {
+  return authorProfile.value?.username || props.post.authorUsername || "member";
+});
+
+const authorAvatarUrl = computed(() => {
+  return authorProfile.value?.avatarUrl || null;
+});
+
+const creditedHelper = computed(() => {
+  if (!props.post.meritRecipientId) return null;
+  const p = getProfile(props.post.meritRecipientId);
+  return {
+    id: props.post.meritRecipientId,
+    name: p?.name || "Community Member",
+    username: p?.username || "member"
+  };
+});
+
+const handleHelperClick = () => {
+  if (props.post.meritRecipientId) {
+    router.push(`/profile/${props.post.meritRecipientId}`);
+  }
+};
 
 const { latestComment } = useLatestComment(() => props.post.id);
 
@@ -341,6 +399,35 @@ const handleCommentClick = () => {
 .meta-icon {
   color: var(--app-text-tertiary);
   flex-shrink: 0;
+}
+
+/* Credited Community Helper Row */
+.post-credited-helper-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: var(--app-primary-soft, #ddf3ff);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--app-primary, #2f9fe8);
+  cursor: pointer;
+  width: fit-content;
+  transition: opacity 0.15s ease;
+}
+
+.post-credited-helper-row:hover {
+  opacity: 0.85;
+}
+
+.merit-credit-icon {
+  flex-shrink: 0;
+}
+
+.helper-link-name {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* Bottom Action Strip: Social Actions */

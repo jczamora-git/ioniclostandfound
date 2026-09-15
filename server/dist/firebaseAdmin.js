@@ -147,3 +147,106 @@ export async function saveMessage(msg) {
     updates[`conversations/${msg.conversationId}/updatedAt`] = msg.createdAt;
     await adminDb.ref().update(updates);
 }
+/**
+  * Normalize username: trim, lowercase, remove leading @, strip invalid characters
+  */
+export function normalizeUsername(username) {
+    return username.trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9_.]/g, '');
+}
+/**
+ * Resolve username to account email for authentication.
+ * Looks up usernames/{normalizedUsername} -> uid -> Firebase Auth User email.
+ */
+export async function resolveUsernameToEmail(rawUsername) {
+    const normalized = normalizeUsername(rawUsername);
+    if (!normalized)
+        return null;
+    let uid = null;
+    // 1. Try Firebase RTDB adminDb
+    try {
+        const snap = await adminDb.ref(`usernames/${normalized}`).once('value');
+        if (snap.exists()) {
+            uid = snap.val();
+        }
+    }
+    catch (err) {
+        // Continue to fallback
+    }
+    // 1b. Fallback: Query RTDB via public REST
+    if (!uid && databaseURL) {
+        try {
+            const cleanDbUrl = databaseURL.replace(/\/+$/, '');
+            const resp = await fetch(`${cleanDbUrl}/usernames/${normalized}.json`);
+            if (resp.ok) {
+                const val = await resp.json();
+                if (typeof val === 'string' && val.trim()) {
+                    uid = val.trim();
+                }
+            }
+        }
+        catch { }
+    }
+    // 1c. Fallback: Search local storage profiles
+    if (!uid) {
+        try {
+            const { findProfileByUsername } = await import('./storage.js');
+            const localProfile = await findProfileByUsername(normalized);
+            if (localProfile && localProfile.id) {
+                uid = localProfile.id;
+                if (localProfile.email && typeof localProfile.email === 'string') {
+                    return localProfile.email.trim().toLowerCase();
+                }
+            }
+        }
+        catch { }
+    }
+    if (!uid) {
+        return null;
+    }
+    // 2. Resolve email using UID
+    // 2a. Try Firebase Admin Auth
+    try {
+        const userRecord = await adminAuth.getUser(uid);
+        if (userRecord && userRecord.email) {
+            return userRecord.email.trim().toLowerCase();
+        }
+    }
+    catch (err) {
+        // Admin auth lookup without cert fallback
+    }
+    // 2b. Try RTDB profiles/{uid}
+    try {
+        const snap = await adminDb.ref(`profiles/${uid}`).once('value');
+        if (snap.exists()) {
+            const profile = snap.val();
+            if (profile && profile.email && typeof profile.email === 'string') {
+                return profile.email.trim().toLowerCase();
+            }
+        }
+    }
+    catch { }
+    // 2c. Try RTDB REST
+    if (databaseURL) {
+        try {
+            const cleanDbUrl = databaseURL.replace(/\/+$/, '');
+            const resp = await fetch(`${cleanDbUrl}/profiles/${uid}.json`);
+            if (resp.ok) {
+                const profile = await resp.json();
+                if (profile && profile.email && typeof profile.email === 'string') {
+                    return profile.email.trim().toLowerCase();
+                }
+            }
+        }
+        catch { }
+    }
+    // 2d. Try local storage profile
+    try {
+        const { getUserProfile } = await import('./storage.js');
+        const profile = await getUserProfile(uid);
+        if (profile && profile.email && typeof profile.email === 'string') {
+            return profile.email.trim().toLowerCase();
+        }
+    }
+    catch { }
+    return null;
+}

@@ -1,11 +1,35 @@
 import { io, Socket } from 'socket.io-client';
+import { App } from '@capacitor/app';
 import { auth } from '../firebase';
 import { getAuthenticatedUser, isDevBypassEnabled, getDevSession } from '../composables/useAuth';
 
 let socket: Socket | null = null;
 let connectPromise: Promise<Socket> | null = null;
+let lifecycleListenersRegistered = false;
 
-const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
+// Determine backend API / Socket server URL with priority:
+// 1. Explicit VITE_API_SERVER_URL or VITE_CHAT_SERVER_URL from .env
+// 2. In browser development only: http://localhost:3000
+const rawServerUrl =
+  import.meta.env.VITE_API_SERVER_URL ||
+  import.meta.env.VITE_CHAT_SERVER_URL;
+
+export const SERVER_URL: string =
+  rawServerUrl && rawServerUrl.trim() !== ''
+    ? rawServerUrl.trim()
+    : import.meta.env.DEV
+    ? 'http://localhost:3000'
+    : '';
+
+if (import.meta.env.DEV) {
+  console.log('[Server Config]', SERVER_URL);
+}
+
+export function getApiServerUrl(): string {
+  return SERVER_URL;
+}
+
+export const getChatServerUrl = getApiServerUrl;
 
 /**
  * Retrieve socket auth payload:
@@ -41,6 +65,53 @@ async function getSocketAuth(): Promise<{ token?: string; devUid?: string }> {
   }
 
   return {};
+}
+
+/**
+ * Register lifecycle listeners once to handle reconnects cleanly when returning from background
+ * or recovering network connectivity on mobile and web.
+ */
+function setupLifecycleListeners() {
+  if (lifecycleListenersRegistered) return;
+  lifecycleListenersRegistered = true;
+
+  try {
+    App.addListener('appStateChange', async ({ isActive }) => {
+      if (isActive && socket && !socket.connected) {
+        if (import.meta.env.DEV) {
+          console.log('[Socket] reconnect');
+        }
+        try {
+          const authPayload = await getSocketAuth();
+          socket.auth = authPayload;
+          socket.connect();
+        } catch {
+          socket.connect();
+        }
+      }
+    }).catch(() => {
+      // Ignore if running in pure browser where Capacitor native bridge is absent
+    });
+  } catch {
+    // Graceful fallback
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', async () => {
+      if (socket && !socket.connected) {
+        if (import.meta.env.DEV) {
+          console.log('[Socket] reconnect');
+        }
+        try {
+          const authPayload = await getSocketAuth();
+          socket.auth = authPayload;
+          socket.connect();
+        } catch {
+          socket.connect();
+        }
+      }
+    });
+  }
 }
 
 /**
@@ -80,25 +151,31 @@ export async function getSocket(): Promise<Socket> {
         timeout: 20000
       });
 
+      setupLifecycleListeners();
+
       socket.on('connect', () => {
         if (import.meta.env.DEV) {
-          console.log('[Socket] connected', {
-            id: socket?.id,
-            devUid: authPayload.devUid
-          });
+          console.log('[Socket] connected');
         }
         resolve(socket!);
       });
 
-      socket.on('connect_error', (err) => {
+      socket.on('connect_error', (err: any) => {
         if (import.meta.env.DEV) {
-          console.warn('[Socket] Connection error:', err.message);
+          const errorContext = err?.description || err?.context || err?.data || '';
+          console.warn('[Socket] connect_error', err.message, errorContext);
         }
       });
 
       socket.on('disconnect', (reason) => {
         if (import.meta.env.DEV) {
           console.log('[Socket] disconnected', reason);
+        }
+      });
+
+      socket.io.on('reconnect', (attempt) => {
+        if (import.meta.env.DEV) {
+          console.log('[Socket] reconnect', attempt);
         }
       });
 

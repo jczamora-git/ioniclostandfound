@@ -3,6 +3,7 @@ import { ref as dbRef, get } from 'firebase/database';
 import { db } from '../firebase';
 import { useAuth, getSessionUser, sessionUid } from './useAuth';
 import { usePosts } from './usePosts';
+import { getChatServerUrl } from '../services/socket';
 import {
   useChatSocket,
   onConversationUpdated,
@@ -12,7 +13,8 @@ import type { Conversation, ConversationThread, ConversationWithMeta } from '../
 import type { Profile } from '../types/profile';
 
 const conversations = ref<ConversationWithMeta[]>([]);
-const loading = ref(false);
+const isConversationsLoading = ref(false);
+const hasConnectionError = ref(false);
 let globalListenerInitialized = false;
 
 export interface CreateConversationOptions {
@@ -174,20 +176,22 @@ export function useConversations() {
 
     // 3. Fallback to server REST API
     try {
-      const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
-      const res = await fetch(`${SERVER_URL}/api/profiles/${otherUid}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.profile) {
-          return {
-            id: otherUid,
-            name: data.profile.name || 'Community Member',
-            username: data.profile.username || 'user',
-            phone: '',
-            avatarUrl: data.profile.avatarUrl || null,
-            createdAt: 0,
-            updatedAt: 0
-          };
+      const serverUrl = getChatServerUrl();
+      if (serverUrl) {
+        const res = await fetch(`${serverUrl}/api/profiles/${otherUid}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.profile) {
+            return {
+              id: otherUid,
+              name: data.profile.name || 'Community Member',
+              username: data.profile.username || 'user',
+              phone: '',
+              avatarUrl: data.profile.avatarUrl || null,
+              createdAt: 0,
+              updatedAt: 0
+            };
+          }
         }
       }
     } catch {}
@@ -343,13 +347,16 @@ export function useConversations() {
     const myUid = sessionUid.value || currentProfile.value?.id;
     if (!myUid) return;
 
-    loading.value = true;
+    isConversationsLoading.value = true;
+    hasConnectionError.value = false;
 
     // Connect shared socket
     try {
       await initSocket();
     } catch (e) {
-      console.warn('[useConversations] Socket init warning:', e);
+      if (import.meta.env.DEV) {
+        console.warn('[useConversations] Socket init warning:', e);
+      }
     }
 
     // Initialize global listeners once
@@ -367,6 +374,13 @@ export function useConversations() {
           target.lastMessageSenderId = msg.senderId;
           target.lastMessageThreadId = msg.threadId;
           target.updatedAt = msg.createdAt;
+          const curUid = sessionUid.value || currentProfile.value?.id;
+          if (curUid && msg.senderId !== curUid) {
+            if (!target.unreadCounts) target.unreadCounts = {};
+            target.unreadCounts[curUid] = (target.unreadCounts[curUid] || 0) + 1;
+            target.unreadCount = (target.unreadCount || 0) + 1;
+            target.unread = true;
+          }
           sortConversations();
         }
       });
@@ -375,17 +389,28 @@ export function useConversations() {
     // Load initial persistent conversations
     try {
       let rawList: Conversation[] = [];
+      let loadSuccess = false;
 
       try {
         rawList = await getConversationList();
+        loadSuccess = true;
       } catch {
         // Fallback to REST endpoint
-        const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
-        const res = await fetch(`${SERVER_URL}/api/conversations/${myUid}`);
-        if (res.ok) {
-          const data = await res.json();
-          rawList = data.conversations || [];
+        const serverUrl = getChatServerUrl();
+        if (serverUrl) {
+          const res = await fetch(`${serverUrl}/api/conversations/${myUid}`);
+          if (res.ok) {
+            const data = await res.json();
+            rawList = data.conversations || [];
+            loadSuccess = true;
+          }
         }
+      }
+
+      if (!loadSuccess && conversations.value.length === 0) {
+        hasConnectionError.value = true;
+      } else {
+        hasConnectionError.value = false;
       }
 
       // Deduplicate conversations so only ONE row appears per other participant
@@ -434,9 +459,14 @@ export function useConversations() {
       loaded.sort((a, b) => (b.lastMessageAt || b.updatedAt) - (a.lastMessageAt || a.updatedAt));
       conversations.value = loaded;
     } catch (err) {
-      console.error('[useConversations] Failed to load conversations:', err);
+      if (import.meta.env.DEV) {
+        console.error('[useConversations] Failed to load conversations:', err);
+      }
+      if (conversations.value.length === 0) {
+        hasConnectionError.value = true;
+      }
     } finally {
-      loading.value = false;
+      isConversationsLoading.value = false;
     }
   };
 
@@ -446,7 +476,9 @@ export function useConversations() {
 
   return {
     conversations,
-    loading,
+    loading: isConversationsLoading,
+    isConversationsLoading,
+    hasConnectionError,
     totalUnreadCount,
     subscribeToConversations,
     stopConversationSubscription,

@@ -34,10 +34,14 @@ export interface Post {
   location: string;
   eventDate: string;
   imageUrl?: string | null;
+  imageKey?: string | null;
   imagePath?: string | null;
   status: PostStatus;
   helpfulCount?: number;
   commentsCount?: number;
+  resolvedAt?: number;
+  resolvedBy?: string;
+  meritRecipientId?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -52,6 +56,7 @@ export interface PostFormData {
   location: string;
   eventDate: string;
   imageUrl?: string | null;
+  imageKey?: string | null;
   imagePath?: string | null;
   imageFile?: File | null;
   removeImage?: boolean;

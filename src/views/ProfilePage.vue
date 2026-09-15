@@ -82,6 +82,13 @@
           </button>
         </section>
 
+        <!-- Achievements Section -->
+        <AchievementsSection
+          v-if="currentProfile?.id"
+          :user-id="currentProfile.id"
+          :is-own-profile="true"
+        />
+
         <!-- My Posts Section Header & Filter Pills -->
         <section class="posts-heading-section">
           <div class="heading-row">
@@ -166,6 +173,7 @@ import {
 import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
 import PostComposerModal from "../components/PostComposerModal.vue";
+import AchievementsSection from "../components/AchievementsSection.vue";
 import { useAuth } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useTheme } from "../composables/useTheme";

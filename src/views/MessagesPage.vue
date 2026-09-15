@@ -23,13 +23,38 @@
           </button>
         </div>
 
-        <!-- Loading State -->
-        <div v-else-if="loading && conversations.length === 0" class="messages-loading">
-          <ion-spinner name="crescent" />
-          <span>Loading conversations...</span>
+        <!-- 1. SKELETON LOADING STATE (4 rows with avatar, name, last-message, timestamp) -->
+        <div v-else-if="isConversationsLoading && conversations.length === 0" class="messages-skeleton-list" aria-label="Loading conversations">
+          <div v-for="n in 4" :key="n" class="skeleton-conversation-row">
+            <div class="skeleton-avatar-box">
+              <ion-skeleton-text :animated="true" class="skeleton-avatar-circle" />
+            </div>
+            <div class="skeleton-row-main">
+              <div class="skeleton-row-top">
+                <ion-skeleton-text :animated="true" class="skeleton-name" />
+                <ion-skeleton-text :animated="true" class="skeleton-time" />
+              </div>
+              <ion-skeleton-text :animated="true" class="skeleton-last-msg" />
+            </div>
+          </div>
         </div>
 
-        <!-- Empty State (Session active, 0 conversations) -->
+        <!-- 2. CONNECTION FAILURE STATE -->
+        <div v-else-if="hasConnectionError && conversations.length === 0" class="messages-empty-state connection-error-state">
+          <div class="empty-icon-bubble warning-bubble">
+            <WifiOff :size="36" />
+          </div>
+          <h3 class="empty-title">Unable to connect to messaging</h3>
+          <p class="empty-sub">
+            Could not reach the messaging server. Please check your network connection and try again.
+          </p>
+          <button type="button" class="retry-btn" @click="handleRetry">
+            <RefreshCw :size="16" class="btn-icon" />
+            Retry
+          </button>
+        </div>
+
+        <!-- 3. EMPTY STATE (Session active, loaded, 0 conversations) -->
         <div v-else-if="conversations.length === 0" class="messages-empty-state">
           <div class="empty-icon-bubble">
             <MessageCircle :size="36" />
@@ -40,7 +65,7 @@
           </p>
         </div>
 
-        <!-- Conversation List -->
+        <!-- 4. REAL CONVERSATION LIST -->
         <div v-else class="conversations-list">
           <ConversationRow
             v-for="conv in conversations"
@@ -62,9 +87,9 @@ import {
   IonContent,
   IonRefresher,
   IonRefresherContent,
-  IonSpinner
+  IonSkeletonText
 } from '@ionic/vue';
-import { MessageCircle, Lock } from 'lucide-vue-next';
+import { MessageCircle, Lock, WifiOff, RefreshCw } from 'lucide-vue-next';
 import PageHeader from '../components/PageHeader.vue';
 import ConversationRow from '../components/ConversationRow.vue';
 import { useConversations } from '../composables/useConversations';
@@ -72,8 +97,13 @@ import { useAuth } from '../composables/useAuth';
 
 const router = useRouter();
 const { hasValidSession } = useAuth();
-const { conversations, loading, subscribeToConversations, stopConversationSubscription } =
-  useConversations();
+const {
+  conversations,
+  isConversationsLoading,
+  hasConnectionError,
+  subscribeToConversations,
+  stopConversationSubscription
+} = useConversations();
 
 onMounted(() => {
   if (hasValidSession.value) {
@@ -93,13 +123,17 @@ onUnmounted(() => {
   stopConversationSubscription();
 });
 
-const handleRefresh = (event: any) => {
+const handleRetry = () => {
+  subscribeToConversations();
+};
+
+const handleRefresh = async (event: any) => {
   if (hasValidSession.value) {
-    subscribeToConversations();
+    await subscribeToConversations();
   }
   setTimeout(() => {
     event.target.complete();
-  }, 600);
+  }, 400);
 };
 
 const handleSelectConversation = (convId: string) => {
@@ -121,16 +155,78 @@ const handleSelectConversation = (convId: string) => {
   margin: 0 auto;
 }
 
-.messages-loading {
+/* Skeleton Loading Styles */
+.messages-skeleton-list {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  gap: 12px;
-  color: var(--app-text-secondary);
+  background: var(--app-surface);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--app-card-border);
 }
 
+.skeleton-conversation-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--app-card-border);
+}
+
+.skeleton-conversation-row:last-child {
+  border-bottom: none;
+}
+
+.skeleton-avatar-box {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.skeleton-avatar-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  margin: 0;
+}
+
+.skeleton-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.skeleton-name {
+  width: 42%;
+  height: 15px;
+  border-radius: 4px;
+  margin: 0;
+}
+
+.skeleton-time {
+  width: 38px;
+  height: 12px;
+  border-radius: 4px;
+  margin: 0;
+}
+
+.skeleton-last-msg {
+  width: 72%;
+  height: 13px;
+  border-radius: 4px;
+  margin: 0;
+}
+
+/* Empty & Error States */
 .messages-empty-state {
   display: flex;
   flex-direction: column;
@@ -153,6 +249,11 @@ const handleSelectConversation = (convId: string) => {
   margin-bottom: 4px;
 }
 
+.warning-bubble {
+  background: rgba(240, 68, 68, 0.08);
+  color: var(--app-lost, #f04444);
+}
+
 .empty-title {
   margin: 0;
   font-size: 17px;
@@ -168,21 +269,38 @@ const handleSelectConversation = (convId: string) => {
   line-height: 1.4;
 }
 
-.auth-btn {
+.auth-btn,
+.retry-btn {
   margin-top: 12px;
-  padding: 10px 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
   background: var(--ion-color-primary, #2F9FE8);
   color: #ffffff;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.retry-btn:active,
+.auth-btn:active {
+  opacity: 0.85;
+}
+
+.btn-icon {
+  flex-shrink: 0;
 }
 
 .conversations-list {
   display: flex;
   flex-direction: column;
   background: var(--app-surface);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--app-card-border);
 }
 </style>

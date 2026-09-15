@@ -1,6 +1,5 @@
 import { ref, computed } from "vue";
 import {
-  signInAnonymously,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   linkWithCredential,
@@ -16,7 +15,8 @@ import {
   remove
 } from "firebase/database";
 import { auth, db } from "../firebase";
-import { disconnectSocket } from "../services/socket";
+import { disconnectSocket, getApiServerUrl } from "../services/socket";
+import { useProfiles } from "./useProfiles";
 import type { Profile, ProfileFormData } from "../types/profile";
 
 export interface DevSession {
@@ -25,6 +25,8 @@ export interface DevSession {
   username: string;
   phone: string;
   email: string;
+  avatarUrl?: string | null;
+  avatarKey?: string | null;
   isDevAccount: true;
 }
 
@@ -40,7 +42,6 @@ export const isDevBypassEnabled = (): boolean => {
 };
 
 export const getDevSession = (): DevSession | null => {
-  if (!isDevBypassEnabled()) return null;
   try {
     const raw = localStorage.getItem(DEV_AUTH_STORAGE_KEY);
     if (!raw) return null;
@@ -99,8 +100,11 @@ const authLoading = ref(true);
 
 let authInitPromise: Promise<User | null> | null = null;
 
+/**
+ * Normalize username: trim, lowercase, remove leading @, strip invalid characters
+ */
 export const normalizeUsername = (username: string): string => {
-  return username.trim().toLowerCase().replace(/[^a-z0-9_.]/g, "");
+  return username.trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9_.]/g, "");
 };
 
 /**
@@ -123,17 +127,17 @@ export function formatAuthError(err: any): string {
     case "auth/user-not-found":
     case "auth/wrong-password":
     case "auth/invalid-credential":
-      return "Invalid email or password. Please verify your credentials.";
+      return "Incorrect email/username or password.";
     case "auth/too-many-requests":
-      return "Too many failed attempts. Please wait a few moments and try again.";
+      return "Too many attempts. Try again later.";
     case "auth/user-disabled":
-      return "This account has been disabled. Please contact support.";
+      return "This account is disabled.";
     case "auth/operation-not-allowed":
       return "Email/Password sign-in is not enabled in Firebase Console.";
     case "auth/configuration-not-found":
       return "Email/Password sign-in provider is not configured in Firebase Console. Please enable it under Authentication > Sign-in method.";
     case "auth/network-request-failed":
-      return "Network connection issue. Please check your internet connection.";
+      return "Unable to connect. Check your connection.";
     case "auth/requires-recent-login":
       return "This operation is sensitive. Please sign in again before proceeding.";
     default:
@@ -146,8 +150,7 @@ export function formatAuthError(err: any): string {
 
 /**
  * Single, unified authentication session initializer.
- * Checks for existing non-anonymous or anonymous session.
- * Does not automatically generate endless anonymous accounts when real auth is present.
+ * Checks for existing Firebase Auth session.
  */
 export function initializeAuthSession(): Promise<User | null> {
   if (authInitPromise) {
@@ -160,7 +163,7 @@ export function initializeAuthSession(): Promise<User | null> {
     onAuthStateChanged(auth, async (user) => {
       authLoading.value = true;
       if (user) {
-        // Real user session exists -> clear any local dev bypass session
+        // Real Firebase Auth session exists -> clear any local dev bypass session
         clearDevSession();
         currentUser.value = user;
         try {
@@ -183,11 +186,11 @@ export function initializeAuthSession(): Promise<User | null> {
         }
       } else {
         // No authenticated Firebase user session.
-        // Check if a dev test session exists in development mode
+        // Check if dev test bypass is explicitly enabled
         if (isDevBypassEnabled()) {
           const devSession = getDevSession();
           if (devSession) {
-            console.warn("[DEV] Firebase Auth bypass enabled. This is not a real authenticated account.");
+            console.warn("[DEV] Firebase Auth bypass enabled. This is a development mock session.");
             const devUser = createDevUser(devSession);
             currentUser.value = devUser;
             currentProfile.value = {
@@ -196,7 +199,8 @@ export function initializeAuthSession(): Promise<User | null> {
               username: devSession.username,
               phone: devSession.phone,
               email: devSession.email,
-              avatarUrl: null,
+              avatarUrl: devSession.avatarUrl || null,
+              avatarKey: devSession.avatarKey || null,
               avatarPath: null,
               createdAt: Date.now(),
               updatedAt: Date.now()
@@ -256,6 +260,7 @@ export const fetchProfile = async (uid: string): Promise<Profile | null> => {
         phone: val.phone || "",
         email: val.email || auth.currentUser?.email || undefined,
         avatarUrl: val.avatarUrl || null,
+        avatarKey: val.avatarKey || null,
         avatarPath: val.avatarPath || null,
         createdAt: val.createdAt || Date.now(),
         updatedAt: val.updatedAt || Date.now()
@@ -283,6 +288,76 @@ export const checkUsernameAvailable = async (
     return true;
   }
 };
+
+/**
+ * Resolve username to account email for authentication.
+ */
+export async function resolveUsername(rawUsername: string): Promise<string> {
+  const clean = normalizeUsername(rawUsername);
+  if (!clean) {
+    throw new Error("Please enter a valid username.");
+  }
+
+  const serverUrl = getApiServerUrl();
+  let resolvedEmail: string | null = null;
+
+  // 1. Preferred: Query Node/Express backend resolution endpoint
+  if (serverUrl) {
+    try {
+      const resp = await fetch(`${serverUrl}/api/auth/resolve-username`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: clean })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.success && data.email) {
+          resolvedEmail = data.email.trim().toLowerCase();
+        }
+      } else if (resp.status === 404) {
+        throw new Error("Account not found.");
+      }
+    } catch (err: any) {
+      if (err.message === "Account not found.") {
+        throw err;
+      }
+      // If network failed to server, proceed to client RTDB fallback
+    }
+  }
+
+  // 2. Direct RTDB fallback: look up usernames/{clean} -> profiles/{uid}/email
+  if (!resolvedEmail) {
+    try {
+      const snap = await get(dbRef(db, `usernames/${clean}`));
+      if (snap.exists()) {
+        const uid = snap.val();
+        if (uid) {
+          const profileSnap = await get(dbRef(db, `profiles/${uid}`));
+          if (profileSnap.exists()) {
+            const profile = profileSnap.val();
+            if (profile && profile.email) {
+              resolvedEmail = profile.email.trim().toLowerCase();
+            }
+          }
+        }
+      }
+    } catch (dbErr) {
+      console.warn("[Auth] Username lookup fallback warning:", dbErr);
+    }
+  }
+
+  // 3. Check for dev-bypass account
+  const devSession = getDevSession();
+  if (devSession && normalizeUsername(devSession.username) === clean) {
+    throw new Error("This account was created in development mode. Please create a real account.");
+  }
+
+  if (!resolvedEmail) {
+    throw new Error("Account not found.");
+  }
+
+  return resolvedEmail;
+}
 
 export interface SessionUser {
   uid: string;
@@ -321,48 +396,113 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
 export function useAuth() {
   /**
-   * Sign in with existing email and password.
+   * Sign in with either Email or Username + Password.
    */
-  const signIn = async (email: string, password: string): Promise<User> => {
-    const cleanEmail = email.trim();
+  const signIn = async (identifier: string, password: string): Promise<User> => {
+    const trimmed = identifier.trim();
+    if (!trimmed) {
+      throw new Error("Email or username is required.");
+    }
+    if (!password) {
+      throw new Error("Password is required.");
+    }
+
+    let targetEmail = "";
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+
+    if (isDevBypassEnabled()) {
+      const cleanUsername = normalizeUsername(trimmed);
+      let targetUid: string | null = null;
+
+      // 1. Try to find user UID by username from RTDB
+      try {
+        if (cleanUsername) {
+          const snap = await get(dbRef(db, `usernames/${cleanUsername}`));
+          if (snap.exists()) {
+            targetUid = snap.val();
+          }
+        }
+      } catch {}
+
+      // 2. Try to match existing dev session from localStorage
+      if (!targetUid) {
+        const existingDev = getDevSession();
+        if (
+          existingDev &&
+          (existingDev.username === cleanUsername ||
+            existingDev.email.toLowerCase() === trimmed.toLowerCase())
+        ) {
+          targetUid = existingDev.uid;
+        }
+      }
+
+      // 3. Fallback: create stable deterministic UID from username
+      if (!targetUid) {
+        targetUid = `dev_${cleanUsername || Math.random().toString(36).substring(2, 9)}`;
+      }
+
+      // Fetch or create profile
+      let profile = await fetchProfile(targetUid);
+      if (!profile) {
+        const defaultName = isEmail ? trimmed.split("@")[0] : trimmed;
+        const defaultUsername = cleanUsername || normalizeUsername(defaultName);
+        profile = {
+          id: targetUid,
+          name: defaultName,
+          username: defaultUsername,
+          phone: "09123456789",
+          email: isEmail ? trimmed.toLowerCase() : `${defaultUsername}@example.com`,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+        try {
+          await set(dbRef(db, `profiles/${targetUid}`), profile);
+          await set(dbRef(db, `usernames/${defaultUsername}`), targetUid);
+        } catch {}
+      }
+
+      const devSession: DevSession = {
+        uid: targetUid,
+        name: profile.name,
+        username: profile.username,
+        phone: profile.phone,
+        email: profile.email || `${profile.username}@example.com`,
+        avatarUrl: profile.avatarUrl,
+        avatarKey: profile.avatarKey,
+        isDevAccount: true
+      };
+
+      saveDevSession(devSession);
+      const devUser = createDevUser(devSession);
+      currentUser.value = devUser;
+      currentProfile.value = profile;
+      useProfiles().setCachedProfile(profile);
+      return devUser;
+    }
+
+    if (isEmail) {
+      targetEmail = trimmed.toLowerCase();
+    } else {
+      // Username lookup -> resolves to account email
+      targetEmail = await resolveUsername(trimmed);
+    }
+
     try {
-      const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      const userCred = await signInWithEmailAndPassword(auth, targetEmail, password);
       clearDevSession();
       currentUser.value = userCred.user;
       const profile = await fetchProfile(userCred.user.uid);
       currentProfile.value = profile;
       return userCred.user;
     } catch (err: any) {
-      const errCode = err?.code || "";
-      if (errCode === "auth/configuration-not-found" && isDevBypassEnabled()) {
-        const devSession = getDevSession();
-        if (devSession && devSession.email.toLowerCase() === cleanEmail.toLowerCase()) {
-          console.warn("[DEV] Firebase Auth bypass enabled. Restoring development test session (not a real authenticated account).");
-          const devUser = createDevUser(devSession);
-          currentUser.value = devUser;
-          currentProfile.value = {
-            id: devSession.uid,
-            name: devSession.name,
-            username: devSession.username,
-            phone: devSession.phone,
-            email: devSession.email,
-            avatarUrl: null,
-            avatarPath: null,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          };
-          return devUser;
-        }
-      }
       console.error("[Auth] Sign in failed:", err);
       throw new Error(formatAuthError(err));
     }
   };
 
   /**
-   * Create a new account or upgrade an existing anonymous user via linkWithCredential.
-   * Preserves the exact same UID so existing posts, comments, conversations, and ownership persist!
-   * In dev bypass mode, if Firebase returns auth/configuration-not-found, creates a temporary local dev account.
+   * Create account.
+   * When DEV bypass is enabled, creates local mock account with stable dev UID.
    */
   const signUp = async (params: {
     name: string;
@@ -371,10 +511,45 @@ export function useAuth() {
     email: string;
     password: string;
   }): Promise<User> => {
-    const cleanEmail = params.email.trim();
+    const cleanEmail = params.email.trim().toLowerCase();
     const cleanUsername = normalizeUsername(params.username);
     const cleanName = params.name.trim();
     const cleanPhone = params.phone.trim();
+
+    if (!cleanName) throw new Error("Full name is required.");
+    if (!cleanUsername || cleanUsername.length < 3) throw new Error("Username must be at least 3 characters.");
+    if (!cleanEmail) throw new Error("Email is required.");
+    if (!params.password || params.password.length < 6) throw new Error("Password must be at least 6 characters.");
+
+    if (isDevBypassEnabled()) {
+      const isAvail = await checkUsernameAvailable(cleanUsername);
+      if (!isAvail) {
+        throw new Error("Username is already taken. Please choose another one.");
+      }
+
+      const uid = `dev_${cleanUsername}`;
+      const devSession: DevSession = {
+        uid,
+        name: cleanName,
+        username: cleanUsername,
+        phone: cleanPhone,
+        email: cleanEmail,
+        isDevAccount: true
+      };
+
+      saveDevSession(devSession);
+      const devUser = createDevUser(devSession);
+      currentUser.value = devUser;
+
+      await saveProfile({
+        name: cleanName,
+        username: cleanUsername,
+        phone: cleanPhone,
+        email: cleanEmail
+      });
+
+      return devUser;
+    }
 
     // Check username availability first
     const isAvail = await checkUsernameAvailable(cleanUsername, auth.currentUser?.uid);
@@ -386,47 +561,24 @@ export function useAuth() {
 
     try {
       if (auth.currentUser && auth.currentUser.isAnonymous) {
-        // Upgrade anonymous user preserving their existing UID!
+        // Upgrade anonymous user preserving their existing UID
         const credential = EmailAuthProvider.credential(cleanEmail, params.password);
         const userCred = await linkWithCredential(auth.currentUser, credential);
         user = userCred.user;
         clearDevSession();
-        console.log("[Auth] Successfully linked anonymous account to email/password with UID:", user.uid);
       } else {
-        // Fresh sign up
+        // Real Firebase Auth account creation
         const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, params.password);
         user = userCred.user;
         clearDevSession();
       }
     } catch (err: any) {
-      const errCode = err?.code || "";
-      if (errCode === "auth/configuration-not-found" && isDevBypassEnabled()) {
-        console.warn("[DEV] Firebase Auth bypass enabled. This is not a real authenticated account.");
-        const cleanPrefix = (cleanName || cleanUsername || "user").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const devUid = (auth.currentUser?.isAnonymous && auth.currentUser?.uid)
-          ? auth.currentUser.uid
-          : `dev_${cleanPrefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-
-        const devSession: DevSession = {
-          uid: devUid,
-          name: cleanName,
-          username: cleanUsername,
-          phone: cleanPhone,
-          email: cleanEmail,
-          isDevAccount: true
-        };
-
-        saveDevSession(devSession);
-        user = createDevUser(devSession);
-      } else {
-        console.error("[Auth] Sign up / linking failed:", err);
-        throw new Error(formatAuthError(err));
-      }
+      console.error("[Auth] Sign up failed:", err);
+      throw new Error(formatAuthError(err));
     }
 
     currentUser.value = user;
 
-    // Save initial profile
     await saveProfile({
       name: cleanName,
       username: cleanUsername,
@@ -438,7 +590,7 @@ export function useAuth() {
   };
 
   /**
-   * Sign out current user, clear state, and disconnect socket.
+   * Sign out current user, clear session, and disconnect socket.
    */
   const signOutUser = async (): Promise<void> => {
     try {
@@ -488,43 +640,38 @@ export function useAuth() {
       phone: data.phone.trim(),
       email: data.email || user.email || currentProfile.value?.email || undefined,
       avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : (currentProfile.value?.avatarUrl || null),
+      avatarKey: data.avatarKey !== undefined ? data.avatarKey : (currentProfile.value?.avatarKey || null),
       avatarPath: data.avatarPath !== undefined ? data.avatarPath : (currentProfile.value?.avatarPath || null),
       createdAt: currentProfile.value?.createdAt || now,
       updatedAt: now
     };
 
-    // Save profile and claim username
-    try {
-      await set(dbRef(db, `profiles/${uid}`), newProfile);
-      await set(dbRef(db, `usernames/${cleanUsername}`), uid);
-    } catch (dbErr) {
-      if ((user as any)?.isDevAccount) {
-        console.warn("[DEV] Realtime Database write skipped or permission denied for mock dev user:", dbErr);
-      } else {
-        throw dbErr;
-      }
-    }
-
-    // Update local dev session if active
-    if ((user as any)?.isDevAccount) {
-      const devSession = getDevSession();
-      if (devSession) {
-        devSession.name = newProfile.name;
-        devSession.username = newProfile.username;
-        devSession.phone = newProfile.phone;
-        devSession.email = newProfile.email || devSession.email;
-        saveDevSession(devSession);
-      }
-    }
+    // Save profile and claim username in Firebase RTDB
+    await set(dbRef(db, `profiles/${uid}`), newProfile);
+    await set(dbRef(db, `usernames/${cleanUsername}`), uid);
 
     currentProfile.value = newProfile;
+    useProfiles().setCachedProfile(newProfile);
+
+    if (isDevBypassEnabled() && (currentUser.value as any)?.isDevAccount) {
+      saveDevSession({
+        uid,
+        name: newProfile.name,
+        username: newProfile.username,
+        phone: newProfile.phone,
+        email: newProfile.email || `${newProfile.username}@example.com`,
+        avatarUrl: newProfile.avatarUrl,
+        avatarKey: newProfile.avatarKey,
+        isDevAccount: true
+      });
+    }
+
     return newProfile;
   };
 
   const getPublicProfile = async (uid: string): Promise<Omit<Profile, "phone" | "email"> | null> => {
     const p = await fetchProfile(uid);
     if (!p) return null;
-    // Phone number and email are strictly private and never exposed publicly!
     return {
       id: p.id,
       name: p.name,
@@ -548,6 +695,7 @@ export function useAuth() {
     hasValidSession,
     isAuthReady,
     authLoading,
+    uid: computed(() => currentUser.value?.uid || null),
     isAuthenticated: computed(() => !!currentUser.value && !currentUser.value.isAnonymous),
     isAnonymous: computed(() => !!currentUser.value?.isAnonymous),
     isDevAccount: computed(() => !!(currentUser.value as any)?.isDevAccount),
@@ -558,6 +706,7 @@ export function useAuth() {
     getSessionUser,
     fetchProfile,
     checkUsernameAvailable,
+    resolveUsername,
     signIn,
     signUp,
     signOutUser,

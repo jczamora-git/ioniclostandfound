@@ -80,10 +80,11 @@
             <div class="notif-details">
               <div class="notif-line-1">
                 <span class="notif-actor-name">{{ item.actorName }}</span>
-                <span class="notif-action-text">commented on your post</span>
+                <span v-if="item.type === 'merit_awarded'" class="notif-action-text merit-text">awarded you a Community Merit 🏅</span>
+                <span v-else class="notif-action-text">commented on your post</span>
               </div>
 
-              <p v-if="item.text" class="notif-comment-quote">
+              <p v-if="item.text && item.type !== 'merit_awarded'" class="notif-comment-quote">
                 &ldquo;{{ item.text }}&rdquo;
               </p>
 
@@ -349,6 +350,11 @@ const handleClickNotification = async (item: AppNotification) => {
 
 .notif-action-text {
   color: var(--app-text-secondary, #64748b);
+}
+
+.merit-text {
+  color: var(--app-primary, #2f9fe8);
+  font-weight: 600;
 }
 
 .notif-row.unread .notif-action-text {

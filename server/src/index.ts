@@ -1,8 +1,15 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+
+// Support loading from both cwd and server/.env locations
+dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), 'server/.env') });
+
 import { socketAuthMiddleware } from './socket/auth.js';
 import { registerConversationHandlers } from './socket/conversations.js';
 import { registerMessageHandlers } from './socket/messages.js';
@@ -18,27 +25,57 @@ import {
   markNotificationRead,
   markAllNotificationsRead
 } from './storage.js';
+import { createRouteHandler } from 'uploadthing/express';
+import { uploadRouter, utapi } from './uploadthing.js';
+import { resolveUsernameToEmail } from './firebaseAdmin.js';
 import type { AppNotification } from './types/chat.js';
 
-dotenv.config();
+if (!process.env.UPLOADTHING_TOKEN) {
+  console.error('[UploadThing] UPLOADTHING_TOKEN is missing');
+}
+console.log('[UploadThing]', {
+  configured: Boolean(process.env.UPLOADTHING_TOKEN)
+});
 
 const app = express();
 const httpServer = createServer(app);
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const allowedOrigins = process.env.CLIENT_ORIGIN
+const PORT = Number(process.env.PORT || 3000);
+const defaultAllowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:8100',
+  'http://localhost',
+  'https://localhost',
+  'capacitor://localhost',
+  'ionic://localhost'
+];
+
+const customOrigins = process.env.CLIENT_ORIGIN
   ? process.env.CLIENT_ORIGIN.split(',').map((o) => o.trim())
-  : ['http://localhost:5173', 'http://localhost:8100', 'http://localhost'];
+  : [];
+
+const allowedOrigins = Array.from(new Set([...defaultAllowedOrigins, ...customOrigins]));
+
+const isOriginAllowed = (origin?: string): boolean => {
+  if (!origin) return true; // Mobile apps / native WebViews often send no Origin header
+  if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) return true;
+  if (process.env.NODE_ENV !== 'production') {
+    // In dev, permit local IP origins (e.g. http://192.168.x.x:*)
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)) {
+      return true;
+    }
+  }
+  return false;
+};
 
 // Middleware
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-        return callback(null, true);
+      if (isOriginAllowed(origin)) {
+        return callback(null, origin || true);
       }
-      return callback(null, true); // Permissive in dev
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
     },
     credentials: true
   })
@@ -48,10 +85,78 @@ app.use(express.json());
 // Health Check
 app.get('/health', (req, res) => {
   res.json({
+    ok: true,
     status: 'ok',
     service: 'lostandfound-chat-server',
     time: new Date().toISOString()
   });
+});
+
+// UploadThing Upload Route Handler
+app.use(
+  '/api/uploadthing',
+  (req, res, next) => {
+    if (!process.env.UPLOADTHING_TOKEN) {
+      console.error('[UploadThing] UPLOADTHING_TOKEN is missing');
+      return res.status(500).json({
+        error: 'Missing token. Please set the UPLOADTHING_TOKEN environment variable'
+      });
+    }
+    next();
+  },
+  createRouteHandler({
+    router: uploadRouter,
+    config: {
+      token: process.env.UPLOADTHING_TOKEN
+    }
+  })
+);
+
+// UploadThing File Deletion Endpoint
+app.post('/api/uploadthing/delete', async (req, res) => {
+  try {
+    const { key, keys } = req.body || {};
+    const targetKeys: string[] = Array.isArray(keys)
+      ? keys.filter(Boolean)
+      : key && typeof key === 'string'
+      ? [key]
+      : [];
+
+    if (targetKeys.length === 0) {
+      return res.status(400).json({ success: false, error: 'No file key provided for deletion.' });
+    }
+
+    if (process.env.UPLOADTHING_TOKEN) {
+      await utapi.deleteFiles(targetKeys);
+    } else if (process.env.NODE_ENV !== 'production') {
+      console.log('[UploadThing Mock Delete] Deleted keys:', targetKeys);
+    }
+
+    return res.json({ success: true, deleted: targetKeys });
+  } catch (err: any) {
+    console.warn('[UploadThing Delete Warning]:', err.message);
+    return res.json({ success: false, error: err.message });
+  }
+});
+
+// Username resolution endpoint for login (email/username + password)
+app.post('/api/auth/resolve-username', async (req, res) => {
+  try {
+    const { username } = req.body || {};
+    if (!username || typeof username !== 'string' || !username.trim()) {
+      return res.status(400).json({ success: false, error: 'Username is required.' });
+    }
+
+    const email = await resolveUsernameToEmail(username);
+    if (!email) {
+      return res.status(404).json({ success: false, error: 'Account not found.' });
+    }
+
+    return res.json({ success: true, email });
+  } catch (err: any) {
+    console.warn('[resolve-username error]:', err.message);
+    return res.status(404).json({ success: false, error: 'Account not found.' });
+  }
 });
 
 // REST Fallback Endpoints
@@ -148,7 +253,12 @@ app.post('/api/notifications/:uid/read-all', async (req, res) => {
 // Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: '*',
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        return callback(null, origin || true);
+      }
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -249,10 +359,11 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`[Server] listening on 0.0.0.0:${PORT}`);
   console.log(`=========================================`);
   console.log(`🚀 Lost & Found Socket.IO Chat Server`);
-  console.log(`📡 Listening on: http://localhost:${PORT}`);
+  console.log(`📡 Listening on: http://0.0.0.0:${PORT} (LAN reachable)`);
   console.log(`🔒 Allowed Origins: ${allowedOrigins.join(', ')}`);
   console.log(`=========================================`);
 });

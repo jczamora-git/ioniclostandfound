@@ -29,16 +29,21 @@
       >
         <!-- Author Avatar -->
         <div class="comment-avatar" @click="handleAuthorClick(comment.authorId)">
-          <UserAvatar :name="comment.authorName" :username="comment.authorUsername" size="sm" />
+          <UserAvatar
+            :name="getCommentAuthorName(comment)"
+            :username="getCommentAuthorUsername(comment)"
+            :avatar-url="getCommentAvatarUrl(comment.authorId)"
+            size="sm"
+          />
         </div>
 
         <!-- Comment Content Directly -->
         <div class="comment-content">
           <div class="comment-author-row">
             <span class="author-name" @click="handleAuthorClick(comment.authorId)">
-              {{ comment.authorName }}
+              {{ getCommentAuthorName(comment) }}
             </span>
-            <span class="author-handle">@{{ comment.authorUsername }}</span>
+            <span class="author-handle">@{{ getCommentAuthorUsername(comment) }}</span>
             <span class="comment-dot">·</span>
             <span class="comment-time">{{ formatTime(comment.createdAt) }}</span>
 
@@ -62,13 +67,15 @@
 </template>
 
 <script setup lang="ts">
+import { watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { IonSpinner } from "@ionic/vue";
 import { Trash2 } from "lucide-vue-next";
 import UserAvatar from "./UserAvatar.vue";
+import { useProfiles } from "../composables/useProfiles";
 import type { PostComment } from "../types/comment";
 
-defineProps<{
+const props = defineProps<{
   comments: PostComment[];
   currentUserId?: string;
   loading?: boolean;
@@ -79,6 +86,25 @@ defineEmits<{
 }>();
 
 const router = useRouter();
+const { getProfile, loadProfiles } = useProfiles();
+
+watchEffect(() => {
+  if (props.comments && props.comments.length > 0) {
+    loadProfiles(props.comments.map((c) => c.authorId));
+  }
+});
+
+const getCommentAuthorName = (comment: PostComment) => {
+  return getProfile(comment.authorId)?.name || comment.authorName || "User";
+};
+
+const getCommentAuthorUsername = (comment: PostComment) => {
+  return getProfile(comment.authorId)?.username || comment.authorUsername || "user";
+};
+
+const getCommentAvatarUrl = (authorId: string) => {
+  return getProfile(authorId)?.avatarUrl || null;
+};
 
 const formatTime = (timestamp: number) => {
   const diffSec = Math.floor((Date.now() - timestamp) / 1000);

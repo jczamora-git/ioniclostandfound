@@ -18,20 +18,20 @@
 
             <!-- Sign In Form -->
             <form class="auth-form" @submit.prevent="handleSignIn">
-              <!-- Email -->
+              <!-- Email or Username -->
               <div class="form-group">
-                <label class="input-label" for="signin-email">Email</label>
+                <label class="input-label" for="signin-identifier">Email or Username</label>
                 <input
-                  id="signin-email"
-                  v-model="signInForm.email"
-                  type="email"
+                  id="signin-identifier"
+                  v-model="signInForm.identifier"
+                  type="text"
                   class="auth-input"
-                  placeholder="name@example.com"
-                  autocomplete="email"
+                  placeholder="you@example.com or username"
+                  autocomplete="username"
                   autocapitalize="none"
-                  @input="clearError('signInEmail')"
+                  @input="clearError('signInIdentifier')"
                 />
-                <span v-if="errors.signInEmail" class="input-error">{{ errors.signInEmail }}</span>
+                <span v-if="errors.signInIdentifier" class="input-error">{{ errors.signInIdentifier }}</span>
               </div>
 
               <!-- Password -->
@@ -325,7 +325,7 @@ const showSignUpPassword = ref(false);
 const showConfirmPassword = ref(false);
 
 const signInForm = reactive({
-  email: "",
+  identifier: "",
   password: ""
 });
 
@@ -339,7 +339,7 @@ const signUpForm = reactive({
 });
 
 const errors = reactive<Record<string, string>>({
-  signInEmail: "",
+  signInIdentifier: "",
   signInPassword: "",
   name: "",
   username: "",
@@ -439,11 +439,9 @@ const validateSignIn = (): boolean => {
   let valid = true;
   globalError.value = "";
 
-  if (!signInForm.email.trim()) {
-    errors.signInEmail = "Email is required.";
-    valid = false;
-  } else if (!validateEmail(signInForm.email)) {
-    errors.signInEmail = "Please enter a valid email address.";
+  const raw = signInForm.identifier.trim();
+  if (!raw) {
+    errors.signInIdentifier = "Email or username is required.";
     valid = false;
   }
 
@@ -529,7 +527,7 @@ const handleSignIn = async () => {
   if (!validateSignIn() || loading.value) return;
   loading.value = true;
   try {
-    await signIn(signInForm.email, signInForm.password);
+    await signIn(signInForm.identifier, signInForm.password);
     const toast = await toastController.create({
       message: "Signed in successfully!",
       duration: 2000,

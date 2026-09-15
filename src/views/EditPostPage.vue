@@ -16,14 +16,15 @@
             <button
               type="button"
               class="header-save-btn"
-              :disabled="saving || loading || !post"
+              :disabled="saving || isUploading || loading || !post"
               @click="handleSave"
             >
-              <ion-spinner v-if="saving" name="crescent" class="btn-spinner" />
+              <ion-spinner v-if="saving || isUploading" name="crescent" class="btn-spinner" />
               <span v-else>Save</span>
             </button>
           </template>
         </PageHeader>
+
         <!-- Post Type Indicator (Read-only for consistency) -->
         <div class="type-banner">
           <span class="type-badge" :class="post.type === 'found' ? 'found' : 'lost'">
@@ -42,6 +43,7 @@
               class="composer-input title-input"
               maxlength="80"
               placeholder="e.g. Black Leather Wallet"
+              :disabled="saving || isUploading"
             />
             <span v-if="errors.title" class="field-error">{{ errors.title }}</span>
           </div>
@@ -50,13 +52,13 @@
             v-model:category="form.category"
             v-model:sub-category="form.subCategory"
             v-model:pending-subcategory="form.pendingSubcategory"
-            :disabled="saving"
+            :disabled="saving || isUploading"
             :error="errors.category"
           />
 
           <CustomDatePicker
             v-model="form.eventDate"
-            :disabled="saving"
+            :disabled="saving || isUploading"
             :error="errors.eventDate"
           />
 
@@ -71,6 +73,7 @@
                 class="composer-input with-icon"
                 placeholder="e.g. Central Mall Food Court"
                 maxlength="100"
+                :disabled="saving || isUploading"
               />
             </div>
             <span v-if="errors.location" class="field-error">{{ errors.location }}</span>
@@ -85,6 +88,7 @@
               class="composer-textarea"
               placeholder="Provide item details..."
               maxlength="800"
+              :disabled="saving || isUploading"
             ></textarea>
             <span v-if="errors.description" class="field-error">{{ errors.description }}</span>
           </div>
@@ -98,7 +102,7 @@
                 <button
                   type="button"
                   class="overlay-action-btn change-btn"
-                  :disabled="saving"
+                  :disabled="saving || isUploading"
                   @click="triggerPhotoPicker"
                 >
                   <Camera :size="14" />
@@ -107,7 +111,7 @@
                 <button
                   type="button"
                   class="overlay-action-btn remove-btn"
-                  :disabled="saving"
+                  :disabled="saving || isUploading"
                   @click="removePhoto"
                 >
                   <Trash2 :size="14" />
@@ -120,7 +124,7 @@
               <button
                 type="button"
                 class="add-photo-btn"
-                :disabled="saving"
+                :disabled="saving || isUploading"
                 @click="triggerPhotoPicker"
               >
                 <ImagePlus :size="18" />
@@ -128,7 +132,6 @@
               </button>
             </div>
 
-            <span class="photo-disabled-hint">Photo upload is not available yet.</span>
             <span v-if="photoError" class="field-error">{{ photoError }}</span>
 
             <input
@@ -149,32 +152,29 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
-  IonBackButton,
-  IonButtons,
   IonContent,
-  IonHeader,
   IonPage,
   IonSpinner,
-  IonTitle,
-  IonToolbar,
   toastController
 } from "@ionic/vue";
-import {
-  MapPin,
-  ImagePlus,
-  Camera,
-  Trash2
-} from "lucide-vue-next";
-import { usePosts } from "../composables/usePosts";
-import { validateImageFile } from "../utils/fileValidation";
+import { Camera, ImagePlus, MapPin, Trash2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import PostCategoryFields from "../components/PostCategoryFields.vue";
 import CustomDatePicker from "../components/CustomDatePicker.vue";
-import { type Post, type PostFormData, type PostFormErrors } from "../types/post";
+import { usePosts } from "../composables/usePosts";
+import { useImageUpload, validateImageFile, MAX_POST_IMAGE_SIZE_BYTES } from "../composables/useImageUpload";
+import type {
+  Post,
+  PostCategory,
+  PostFormData,
+  PostFormErrors,
+  PostType
+} from "../types/post";
 
 const route = useRoute();
 const router = useRouter();
 const { getPostById, updatePost } = usePosts();
+const { uploadPostImage, deleteUploadedFile, isUploading } = useImageUpload();
 
 const postId = computed(() => route.params.id as string);
 const post = ref<Post | null>(null);
@@ -188,9 +188,9 @@ const removePhotoFlag = ref(false);
 const photoError = ref("");
 
 const form = reactive<PostFormData>({
-  type: "lost",
+  type: "lost" as PostType,
   title: "",
-  category: "",
+  category: "" as PostCategory,
   subCategory: "",
   pendingSubcategory: undefined,
   description: "",
@@ -213,6 +213,7 @@ onMounted(async () => {
     form.location = post.value.location;
     form.eventDate = post.value.eventDate;
     form.imageUrl = post.value.imageUrl || "";
+    form.imageKey = post.value.imageKey || "";
     previewPhotoUrl.value = post.value.imageUrl || "";
   }
   loading.value = false;
@@ -233,7 +234,7 @@ const onPhotoSelected = (event: Event) => {
   const file = target.files?.[0];
   if (!file) return;
 
-  const validation = validateImageFile(file);
+  const validation = validateImageFile(file, MAX_POST_IMAGE_SIZE_BYTES);
   if (!validation.valid) {
     photoError.value = validation.error || "Please select a valid image.";
     if (fileInputRef.value) fileInputRef.value.value = "";
@@ -290,14 +291,27 @@ const validate = (): boolean => {
 };
 
 const handleSave = async () => {
-  if (saving.value || loading.value || !post.value || !validate()) return;
+  if (saving.value || isUploading.value || loading.value || !post.value || !validate()) return;
   saving.value = true;
-  try {
-    // Never persist local blob or attempt storage upload
-    const existingRemoteUrl =
-      post.value.imageUrl && !post.value.imageUrl.startsWith("blob:") ? post.value.imageUrl : null;
+  photoError.value = "";
 
-    await updatePost(postId.value, {
+  const oldImageKey = post.value.imageKey;
+
+  try {
+    let newImageUrl: string | null | undefined = undefined;
+    let newImageKey: string | null | undefined = undefined;
+
+    if (selectedPhotoFile.value) {
+      // Upload new image to UploadThing
+      const uploadRes = await uploadPostImage(selectedPhotoFile.value);
+      newImageUrl = uploadRes.url;
+      newImageKey = uploadRes.key;
+    } else if (removePhotoFlag.value) {
+      newImageUrl = null;
+      newImageKey = null;
+    }
+
+    const payload: Partial<PostFormData> = {
       title: form.title,
       category: form.category,
       subCategory: form.subCategory,
@@ -305,10 +319,21 @@ const handleSave = async () => {
       description: form.description,
       location: form.location,
       eventDate: form.eventDate,
-      imageUrl: existingRemoteUrl,
-      imageFile: null,
-      removeImage: false
-    });
+      ...(newImageUrl !== undefined
+        ? { imageUrl: newImageUrl, imageKey: newImageKey, removeImage: removePhotoFlag.value }
+        : {
+            imageUrl: post.value.imageUrl && !post.value.imageUrl.startsWith("blob:") ? post.value.imageUrl : null,
+            imageKey: post.value.imageKey || null
+          })
+    };
+
+    // Update Firebase post
+    await updatePost(postId.value, payload);
+
+    // After post update succeeds, delete old file from UploadThing if replaced/removed
+    if (oldImageKey && (newImageKey || removePhotoFlag.value)) {
+      deleteUploadedFile(oldImageKey).catch(() => {});
+    }
 
     const toast = await toastController.create({
       message: "Post updated successfully.",
@@ -320,7 +345,9 @@ const handleSave = async () => {
 
     router.replace(`/post/${postId.value}`);
   } catch (err: any) {
-    console.error("Update post error:", err);
+    if (import.meta.env.DEV) {
+      console.error("Update post error:", err);
+    }
     const toast = await toastController.create({
       message: err.message || "Failed to update post.",
       duration: 3000,
@@ -339,41 +366,6 @@ const handleSave = async () => {
   --background: var(--app-bg);
 }
 
-.ios-toolbar {
-  --background: var(--app-dock-bg);
-  --backdrop-filter: blur(20px);
-}
-
-.ios-header-title {
-  font-size: 17px;
-  font-weight: 600;
-}
-
-.header-save-btn {
-  background: transparent;
-  border: none;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--ion-color-primary);
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.btn-spinner {
-  width: 18px;
-  height: 18px;
-}
-
-.loading-wrap,
-.not-found-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  color: var(--app-text-secondary);
-}
-
 .form-container {
   padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 40px;
   display: flex;
@@ -383,47 +375,76 @@ const handleSave = async () => {
   margin: 0 auto;
 }
 
+.header-save-btn {
+  background: var(--app-primary);
+  color: #ffffff;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  min-height: 34px;
+  transition: opacity 0.15s ease;
+}
+
+.header-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-spinner {
+  width: 16px;
+  height: 16px;
+  --color: #ffffff;
+}
+
 .type-banner {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--app-surface);
-  border-radius: 14px;
   padding: 10px 14px;
+  background: var(--app-surface-secondary);
+  border-radius: 12px;
   border: 1px solid var(--app-card-border);
 }
 
 .type-badge {
   font-size: 11px;
   font-weight: 700;
-  padding: 4px 8px;
-  border-radius: 8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.5px;
 }
 
 .type-badge.lost {
-  background: var(--status-lost-bg);
-  color: var(--status-lost-text);
+  background: rgba(240, 68, 68, 0.15);
+  color: var(--app-lost);
 }
 
 .type-badge.found {
-  background: var(--status-found-bg);
-  color: var(--status-found-text);
+  background: rgba(34, 181, 115, 0.15);
+  color: var(--app-found);
 }
 
 .type-hint {
   font-size: 12px;
-  color: var(--app-text-secondary);
+  color: var(--app-text-tertiary);
 }
 
 .form-card {
   background: var(--app-surface);
-  border-radius: 20px;
+  border-radius: 24px;
   padding: 20px 16px;
-  box-shadow: var(--app-card-shadow);
-  border: 1px solid var(--app-card-border);
   display: flex;
   flex-direction: column;
   gap: 16px;
+  box-shadow: var(--app-card-shadow);
+  border: 1px solid var(--app-card-border);
 }
 
 .field-group {
@@ -435,40 +456,29 @@ const handleSave = async () => {
 .field-label {
   font-size: 11px;
   font-weight: 700;
+  color: var(--app-text-tertiary);
   letter-spacing: 0.5px;
-  color: var(--app-text-secondary);
 }
 
 .composer-input,
 .composer-textarea {
   width: 100%;
-  background: var(--app-input-background);
-  border: 1px solid var(--app-border);
-  border-radius: 12px;
+  background: var(--app-surface-secondary);
+  border: 1px solid var(--app-card-border);
+  border-radius: 14px;
   padding: 12px 14px;
   font-size: 15px;
   color: var(--app-text-primary);
-  box-sizing: border-box;
-  font-family: inherit;
   outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
   transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.composer-input {
-  height: 48px;
 }
 
 .composer-input:focus,
 .composer-textarea:focus {
-  border-color: var(--ion-color-primary);
-}
-
-.title-input {
-  font-weight: 600;
-}
-
-.composer-textarea {
-  resize: none;
+  border-color: var(--app-primary);
+  background: var(--app-surface);
 }
 
 .input-with-icon {
@@ -479,9 +489,8 @@ const handleSave = async () => {
 
 .leading-icon {
   position: absolute;
-  left: 12px;
-  font-size: 18px;
-  color: var(--app-text-secondary);
+  left: 14px;
+  color: var(--app-text-tertiary);
   pointer-events: none;
 }
 
@@ -489,27 +498,19 @@ const handleSave = async () => {
   padding-left: 38px;
 }
 
-.field-error {
-  font-size: 12px;
-  color: var(--ion-color-danger);
-}
-
 .photo-preview-box {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  max-height: 220px;
-  border-radius: 12px;
+  height: 200px;
+  border-radius: 14px;
   overflow: hidden;
-  border: 1px solid var(--app-card-border);
-  margin-top: 4px;
+  background: var(--app-surface-secondary);
 }
 
 .preview-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
 }
 
 .photo-overlay-actions {
@@ -517,7 +518,6 @@ const handleSave = async () => {
   bottom: 10px;
   right: 10px;
   display: flex;
-  align-items: center;
   gap: 8px;
 }
 
@@ -531,53 +531,61 @@ const handleSave = async () => {
   font-weight: 600;
   cursor: pointer;
   border: none;
+  backdrop-filter: blur(10px);
+  transition: opacity 0.15s ease;
+}
+
+.change-btn {
   background: rgba(0, 0, 0, 0.7);
   color: #ffffff;
-  backdrop-filter: blur(8px);
-  transition: background-color 0.15s ease;
 }
 
-.overlay-action-btn:active {
-  background: rgba(0, 0, 0, 0.85);
-}
-
-.overlay-action-btn.remove-btn:hover,
-.overlay-action-btn.remove-btn:active {
+.remove-btn {
   background: rgba(239, 68, 68, 0.85);
+  color: #ffffff;
 }
 
 .photo-add-box {
-  display: flex;
-  flex-direction: column;
+  width: 100%;
 }
 
 .add-photo-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  align-self: flex-start;
-  padding: 8px 14px;
+  padding: 10px 16px;
   background: var(--app-surface-secondary);
   border: 1px dashed var(--app-card-border);
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--app-text-secondary);
+  border-radius: 14px;
+  color: var(--app-primary);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .add-photo-btn:active {
-  background: var(--app-surface-tertiary, rgba(20, 25, 30, 0.08));
-}
-
-.photo-disabled-hint {
-  font-size: 11px;
-  color: var(--app-text-tertiary);
-  margin-top: 2px;
+  background: var(--app-primary-soft);
 }
 
 .hidden-file-input {
   display: none;
+}
+
+.field-error {
+  font-size: 12px;
+  color: var(--app-lost);
+  font-weight: 500;
+}
+
+.loading-wrap,
+.not-found-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  gap: 12px;
+  color: var(--app-text-secondary);
 }
 </style>

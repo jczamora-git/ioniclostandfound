@@ -121,7 +121,6 @@
             <ImagePlus :size="18" />
             <span>Add Photo</span>
           </button>
-          <span class="photo-disabled-hint">Photo upload is not available yet.</span>
         </div>
 
         <span v-if="photoError" class="field-error-text">{{ photoError }}</span>
@@ -361,7 +360,7 @@ const handleSubmit = async () => {
     emit("submit", {
       ...form,
       imageUrl: validRemoteImageUrl,
-      imageFile: null
+      imageFile: form.imageFile || null
     });
   } finally {
     submitting.value = false;

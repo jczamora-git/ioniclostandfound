@@ -4,6 +4,7 @@
       <div class="ios-screen-container edit-container">
         <!-- Unified Header with Back Navigation -->
         <PageHeader title="Edit Profile" :show-back="true" default-back-url="/tabs/profile" />
+
         <!-- Avatar Preview and Actions -->
         <div class="avatar-preview-section">
           <UserAvatar
@@ -16,7 +17,7 @@
             <button
               type="button"
               class="avatar-action-btn change-photo-btn"
-              :disabled="saving"
+              :disabled="saving || isUploading"
               @click="triggerPhotoPicker"
             >
               <Camera :size="15" />
@@ -26,14 +27,13 @@
               v-if="previewAvatarUrl"
               type="button"
               class="avatar-action-btn remove-photo-btn"
-              :disabled="saving"
+              :disabled="saving || isUploading"
               @click="handleRemovePhoto"
             >
               <Trash2 :size="14" />
               <span>Remove Photo</span>
             </button>
           </div>
-          <span class="photo-disabled-hint">Photo upload is not available yet.</span>
           <input
             ref="fileInputRef"
             type="file"
@@ -54,6 +54,7 @@
               class="ios-input"
               placeholder="Your Full Name"
               maxlength="50"
+              :disabled="saving || isUploading"
             />
             <span v-if="errors.name" class="field-error">{{ errors.name }}</span>
           </div>
@@ -70,6 +71,7 @@
                 placeholder="username"
                 autocapitalize="none"
                 maxlength="30"
+                :disabled="saving || isUploading"
                 @input="handleUsernameInput"
               />
             </div>
@@ -86,6 +88,7 @@
               class="ios-input"
               placeholder="e.g., 09XXXXXXXXX"
               maxlength="20"
+              :disabled="saving || isUploading"
             />
             <span class="field-hint">Your phone number is strictly private and never displayed publicly</span>
             <span v-if="errors.phone" class="field-error">{{ errors.phone }}</span>
@@ -102,10 +105,10 @@
         <button
           type="button"
           class="save-changes-btn"
-          :disabled="saving"
+          :disabled="saving || isUploading"
           @click="handleSave"
         >
-          <ion-spinner v-if="saving" name="crescent" class="btn-spinner" />
+          <ion-spinner v-if="saving || isUploading" name="crescent" class="btn-spinner" />
           <span v-else>Save Changes</span>
         </button>
       </div>
@@ -126,11 +129,12 @@ import { AlertCircle, Camera, Trash2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import UserAvatar from "../components/UserAvatar.vue";
 import { normalizeUsername, useAuth } from "../composables/useAuth";
-import { validateImageFile } from "../utils/fileValidation";
+import { useImageUpload, validateImageFile, MAX_AVATAR_SIZE_BYTES } from "../composables/useImageUpload";
 import type { ProfileFormData } from "../types/profile";
 
 const router = useRouter();
 const { currentProfile, saveProfile, checkUsernameAvailable } = useAuth();
+const { uploadAvatar, deleteUploadedFile, isUploading } = useImageUpload();
 
 const form = reactive({
   name: "",
@@ -171,7 +175,7 @@ const onFileSelected = (event: Event) => {
   const file = target.files?.[0];
   if (!file) return;
 
-  const validation = validateImageFile(file);
+  const validation = validateImageFile(file, MAX_AVATAR_SIZE_BYTES);
   if (!validation.valid) {
     globalError.value = validation.error || "Please select a valid image.";
     if (fileInputRef.value) fileInputRef.value.value = "";
@@ -240,24 +244,49 @@ const validate = async (): Promise<boolean> => {
 };
 
 const handleSave = async () => {
-  if (saving.value) return;
+  if (saving.value || isUploading.value) return;
   const isValid = await validate();
   if (!isValid) return;
 
   saving.value = true;
   globalError.value = "";
 
+  const oldAvatarKey = currentProfile.value?.avatarKey;
+
   try {
+    let newAvatarUrl: string | null | undefined = undefined;
+    let newAvatarKey: string | null | undefined = undefined;
+
+    if (selectedFile.value) {
+      // Upload new avatar to UploadThing first
+      const uploadRes = await uploadAvatar(selectedFile.value);
+      newAvatarUrl = uploadRes.url;
+      newAvatarKey = uploadRes.key;
+    } else if (removeAvatar.value) {
+      newAvatarUrl = null;
+      newAvatarKey = null;
+    }
+
     const payload: ProfileFormData = {
       name: form.name.trim(),
       username: normalizeUsername(form.username),
       phone: form.phone.trim(),
-      // Keep existing avatar unchanged
-      ...(currentProfile.value?.avatarUrl ? { avatarUrl: currentProfile.value.avatarUrl } : {}),
-      ...(currentProfile.value?.avatarPath ? { avatarPath: currentProfile.value.avatarPath } : {})
+      ...(newAvatarUrl !== undefined
+        ? { avatarUrl: newAvatarUrl, avatarKey: newAvatarKey, avatarPath: null }
+        : {
+            avatarUrl: currentProfile.value?.avatarUrl || null,
+            avatarKey: currentProfile.value?.avatarKey || null,
+            avatarPath: currentProfile.value?.avatarPath || null
+          })
     };
 
+    // Save profile to Firebase Realtime Database
     await saveProfile(payload);
+
+    // After profile update succeeds, delete old file from UploadThing if replaced/removed
+    if (oldAvatarKey && (newAvatarKey || removeAvatar.value)) {
+      deleteUploadedFile(oldAvatarKey).catch(() => {});
+    }
 
     const toast = await toastController.create({
       message: "Profile updated successfully.",
@@ -269,7 +298,9 @@ const handleSave = async () => {
 
     router.replace("/tabs/profile");
   } catch (err: any) {
-    console.error("Update profile error:", err);
+    if (import.meta.env.DEV) {
+      console.error("Update profile error:", err);
+    }
     globalError.value = err.message || "Failed to save profile.";
   } finally {
     saving.value = false;
@@ -315,12 +346,6 @@ const handleSave = async () => {
 .avatar-action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.photo-disabled-hint {
-  font-size: 11px;
-  color: var(--app-text-tertiary);
-  margin-top: -4px;
 }
 
 .btn-spinner {
