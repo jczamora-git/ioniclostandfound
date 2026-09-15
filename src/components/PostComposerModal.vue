@@ -108,6 +108,7 @@
               <span>Remove</span>
             </button>
           </div>
+          <span class="photo-disabled-hint">Photo upload is not available yet.</span>
         </div>
 
         <div v-else class="photo-add-section">
@@ -120,6 +121,7 @@
             <ImagePlus :size="18" />
             <span>Add Photo</span>
           </button>
+          <span class="photo-disabled-hint">Photo upload is not available yet.</span>
         </div>
 
         <span v-if="photoError" class="field-error-text">{{ photoError }}</span>
@@ -179,7 +181,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onUnmounted, reactive, ref, watch } from "vue";
 import { IonModal, IonSpinner } from "@ionic/vue";
 import {
   MapPin,
@@ -192,7 +194,7 @@ import UserAvatar from "./UserAvatar.vue";
 import PostCategoryFields from "./PostCategoryFields.vue";
 import CustomDatePicker from "./CustomDatePicker.vue";
 import { useAuth } from "../composables/useAuth";
-import { validateImageFile } from "../composables/useStorageUpload";
+import { validateImageFile } from "../utils/fileValidation";
 import {
   type PostFormData,
   type PostFormErrors,
@@ -314,6 +316,12 @@ const removePhoto = () => {
   if (fileInputRef.value) fileInputRef.value.value = "";
 };
 
+onUnmounted(() => {
+  if (previewPhotoUrl.value?.startsWith("blob:")) {
+    URL.revokeObjectURL(previewPhotoUrl.value);
+  }
+});
+
 const validate = (): boolean => {
   let valid = true;
   Object.keys(errors).forEach((k) => delete errors[k as keyof PostFormData]);
@@ -346,7 +354,15 @@ const handleSubmit = async () => {
   if (submitting.value || !validate()) return;
   submitting.value = true;
   try {
-    emit("submit", { ...form });
+    // Never save local blob: URLs to database
+    const validRemoteImageUrl =
+      form.imageUrl && !form.imageUrl.startsWith("blob:") ? form.imageUrl.trim() : null;
+
+    emit("submit", {
+      ...form,
+      imageUrl: validRemoteImageUrl,
+      imageFile: null
+    });
   } finally {
     submitting.value = false;
   }
@@ -629,6 +645,12 @@ const handleClose = () => {
 
 .add-photo-btn:active {
   background: var(--app-surface-tertiary, rgba(20, 25, 30, 0.08));
+}
+
+.photo-disabled-hint {
+  font-size: 11px;
+  color: var(--app-text-tertiary);
+  margin-top: 2px;
 }
 
 .hidden-file-input {

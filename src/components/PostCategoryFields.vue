@@ -45,8 +45,8 @@
     <!-- Category / Subcategory Sheet Modal -->
     <ion-modal
       :is-open="activePicker !== null"
-      :breakpoints="[0, 0.65, 0.9]"
-      :initial-breakpoint="0.65"
+      :breakpoints="[0, 0.72, 0.95]"
+      :initial-breakpoint="0.72"
       :expand-to-scroll="false"
       class="category-picker-modal"
       aria-label="Choose a category or subcategory"
@@ -54,9 +54,14 @@
     >
       <div class="choice-sheet">
         <header class="choice-header">
-          <h2 class="choice-title">
-            {{ activePicker === 'category' ? 'Select Category' : 'Select Subcategory' }}
-          </h2>
+          <div class="header-titles">
+            <h2 class="choice-title">
+              {{ activePicker === 'category' ? 'Select Category' : 'Select Subcategory' }}
+            </h2>
+            <span class="choice-subtitle">
+              {{ activePicker === 'category' ? categoryOptions.length : subcategoryOptions.length }} options &bull; Scroll to view all
+            </span>
+          </div>
           <button
             type="button"
             class="close-sheet-btn"
@@ -67,11 +72,14 @@
           </button>
         </header>
 
-        <div
-          class="choice-list"
-          role="group"
-          :aria-label="activePicker === 'category' ? 'Categories' : 'Subcategories'"
-        >
+        <div class="choice-list-wrapper">
+          <div
+            ref="choiceListEl"
+            class="choice-list"
+            role="group"
+            :aria-label="activePicker === 'category' ? 'Categories' : 'Subcategories'"
+            @scroll="onChoiceListScroll"
+          >
           <!-- Subcategory: None (optional) -->
           <button
             v-if="activePicker === 'subcategory'"
@@ -152,17 +160,35 @@
               <p v-if="customError" class="field-error" role="alert">{{ customError }}</p>
             </div>
           </div>
+
+          <!-- Subtle End of List marker -->
+          <div class="list-end-hint">
+            <span class="end-dot"></span>
+            <span>All {{ activePicker === 'category' ? 'categories' : 'subcategories' }} loaded</span>
+          </div>
         </div>
+
+        <!-- Floating Scroll Hint with Gradient Fade -->
+        <transition name="fade-hint">
+          <div v-if="canScrollMore" class="scroll-more-overlay" @click="scrollDownList">
+            <button type="button" class="scroll-more-pill" aria-label="Scroll down for more items">
+              <span>More below</span>
+              <ChevronDown :size="14" class="bounce-icon" />
+            </button>
+          </div>
+        </transition>
       </div>
-    </ion-modal>
-  </div>
+    </div>
+  </ion-modal>
+</div>
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { IonModal } from "@ionic/vue";
 import {
   Check,
+  ChevronDown,
   ChevronRight,
   ListFilter,
   LoaderCircle,
@@ -208,12 +234,39 @@ const {
 } = useCategories();
 
 const activePicker = ref<"category" | "subcategory" | null>(null);
+const choiceListEl = ref<HTMLElement | null>(null);
+const canScrollMore = ref(false);
 const showCustomInput = ref(false);
 const customName = ref("");
 const customError = ref("");
 const isChecking = ref(false);
 const localChoices = ref<Record<string, Record<string, { name: string; isNew: boolean }>>>({});
 let isActive = true;
+
+const updateScrollState = () => {
+  const el = choiceListEl.value;
+  if (!el) return;
+  canScrollMore.value = el.scrollHeight - (el.scrollTop + el.clientHeight) > 20;
+};
+
+const onChoiceListScroll = () => {
+  updateScrollState();
+};
+
+const scrollDownList = () => {
+  if (choiceListEl.value) {
+    choiceListEl.value.scrollBy({ top: 180, behavior: "smooth" });
+  }
+};
+
+watch(activePicker, async (val) => {
+  if (val) {
+    canScrollMore.value = true;
+    await nextTick();
+    updateScrollState();
+    setTimeout(updateScrollState, 350);
+  }
+});
 
 const categoryKey = (cat: string) => getCategoryConfig(cat)?.key || normalizeCategoryKey(cat);
 const isKnownCategory = computed(() => Boolean(getCategoryConfig(props.category)));
@@ -476,11 +529,23 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .choice-title {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
   color: var(--app-text-primary);
+}
+
+.choice-subtitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text-tertiary);
 }
 
 .close-sheet-btn {
@@ -501,10 +566,110 @@ onUnmounted(() => {
   background: var(--app-surface-secondary);
 }
 
+.choice-list-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .choice-list {
   overflow-y: auto;
   flex: 1;
-  padding: 8px 18px max(24px, env(safe-area-inset-bottom, 24px));
+  padding: 8px 18px 48px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-card-border) transparent;
+}
+
+.choice-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.choice-list::-webkit-scrollbar-thumb {
+  background: var(--app-card-border);
+  border-radius: 4px;
+}
+
+.list-end-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.end-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--app-text-tertiary);
+}
+
+.scroll-more-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  background: linear-gradient(to top, var(--app-surface) 35%, transparent 100%);
+}
+
+.scroll-more-pill {
+  pointer-events: auto;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 13px;
+  border-radius: 16px;
+  background: var(--app-surface);
+  color: var(--app-primary);
+  border: 1px solid var(--app-card-border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.scroll-more-pill:active {
+  transform: scale(0.96);
+  background: var(--app-surface-secondary);
+}
+
+.bounce-icon {
+  animation: bounceDown 1.6s ease-in-out infinite;
+}
+
+@keyframes bounceDown {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+.fade-hint-enter-active,
+.fade-hint-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-hint-enter-from,
+.fade-hint-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 .choice-row {

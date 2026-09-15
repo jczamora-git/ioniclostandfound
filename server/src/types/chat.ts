@@ -1,6 +1,7 @@
 export interface Conversation {
   id: string;
-  postId: string;
+  postId?: string | null;
+  type?: 'post' | 'direct';
   participantIds: string[];
   createdAt: number;
   updatedAt: number;
@@ -23,7 +24,8 @@ export interface SocketUser {
 }
 
 export interface CreateConversationPayload {
-  postId: string;
+  postId?: string | null;
+  type?: 'post' | 'direct';
   otherUserId: string;
 }
 

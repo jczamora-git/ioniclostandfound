@@ -1,25 +1,5 @@
 <template>
   <ion-page>
-    <ion-header :translucent="true" class="ios-edit-header">
-      <ion-toolbar class="ios-toolbar">
-        <ion-buttons slot="start">
-          <ion-back-button :default-href="`/post/${postId}`" text="Cancel" />
-        </ion-buttons>
-        <ion-title class="ios-header-title">Edit Post</ion-title>
-        <ion-buttons slot="end">
-          <button
-            type="button"
-            class="header-save-btn"
-            :disabled="saving || loading || !post"
-            @click="handleSave"
-          >
-            <ion-spinner v-if="saving" name="crescent" class="btn-spinner" />
-            <span v-else>Save</span>
-          </button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-
     <ion-content :fullscreen="true" class="edit-post-content">
       <div v-if="loading" class="loading-wrap">
         <ion-spinner name="crescent" />
@@ -31,6 +11,19 @@
       </div>
 
       <div v-else class="ios-screen-container form-container">
+        <PageHeader title="Edit Post" :show-back="true" :default-back-url="`/post/${postId}`">
+          <template #action>
+            <button
+              type="button"
+              class="header-save-btn"
+              :disabled="saving || loading || !post"
+              @click="handleSave"
+            >
+              <ion-spinner v-if="saving" name="crescent" class="btn-spinner" />
+              <span v-else>Save</span>
+            </button>
+          </template>
+        </PageHeader>
         <!-- Post Type Indicator (Read-only for consistency) -->
         <div class="type-banner">
           <span class="type-badge" :class="post.type === 'found' ? 'found' : 'lost'">
@@ -135,6 +128,7 @@
               </button>
             </div>
 
+            <span class="photo-disabled-hint">Photo upload is not available yet.</span>
             <span v-if="photoError" class="field-error">{{ photoError }}</span>
 
             <input
@@ -172,7 +166,8 @@ import {
   Trash2
 } from "lucide-vue-next";
 import { usePosts } from "../composables/usePosts";
-import { validateImageFile } from "../composables/useStorageUpload";
+import { validateImageFile } from "../utils/fileValidation";
+import PageHeader from "../components/PageHeader.vue";
 import PostCategoryFields from "../components/PostCategoryFields.vue";
 import CustomDatePicker from "../components/CustomDatePicker.vue";
 import { type Post, type PostFormData, type PostFormErrors } from "../types/post";
@@ -298,6 +293,10 @@ const handleSave = async () => {
   if (saving.value || loading.value || !post.value || !validate()) return;
   saving.value = true;
   try {
+    // Never persist local blob or attempt storage upload
+    const existingRemoteUrl =
+      post.value.imageUrl && !post.value.imageUrl.startsWith("blob:") ? post.value.imageUrl : null;
+
     await updatePost(postId.value, {
       title: form.title,
       category: form.category,
@@ -306,8 +305,9 @@ const handleSave = async () => {
       description: form.description,
       location: form.location,
       eventDate: form.eventDate,
-      imageFile: selectedPhotoFile.value,
-      removeImage: removePhotoFlag.value
+      imageUrl: existingRemoteUrl,
+      imageFile: null,
+      removeImage: false
     });
 
     const toast = await toastController.create({
@@ -375,10 +375,12 @@ const handleSave = async () => {
 }
 
 .form-container {
-  padding: 16px 16px 40px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 40px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  max-width: var(--max-content-width, 600px);
+  margin: 0 auto;
 }
 
 .type-banner {
@@ -567,6 +569,12 @@ const handleSave = async () => {
 
 .add-photo-btn:active {
   background: var(--app-surface-tertiary, rgba(20, 25, 30, 0.08));
+}
+
+.photo-disabled-hint {
+  font-size: 11px;
+  color: var(--app-text-tertiary);
+  margin-top: 2px;
 }
 
 .hidden-file-input {

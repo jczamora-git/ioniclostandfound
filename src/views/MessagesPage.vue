@@ -85,23 +85,12 @@ const handleSelectConversation = (convId: string) => {
 }
 
 .messages-container {
-  padding: 12px 0 80px;
-  max-width: 640px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 100px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: var(--max-content-width, 600px);
   margin: 0 auto;
-}
-
-.messages-top-bar {
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--app-card-border);
-  background: var(--app-surface);
-}
-
-.messages-brand-title {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  color: var(--app-text-primary);
 }
 
 .messages-loading {

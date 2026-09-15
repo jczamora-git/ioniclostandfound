@@ -21,7 +21,6 @@ import type {
 } from "../types/post";
 import { getCategoryConfig, normalizeCategoryKey } from "../config/categories";
 import { resolveCustomSubcategory, type ResolvedCustomSubcategory } from "./useCategories";
-import { useStorageUpload } from "./useStorageUpload";
 
 const posts = ref<Post[]>([]);
 const postsLoading = ref(true);
@@ -189,17 +188,14 @@ export function usePosts() {
       throw new Error("You must complete your profile first.");
     }
 
-    const { uploadPostImage, deleteStorageFile } = useStorageUpload();
-    const uid = currentProfile.value.id;
     const postsNode = dbRef(db, "posts");
     const newPostRef = push(postsNode);
     const postId = newPostRef.key!;
     const now = Date.now();
 
-    let uploaded: { downloadUrl: string; storagePath: string } | null = null;
-    if (data.imageFile) {
-      uploaded = await uploadPostImage(data.imageFile, uid, postId);
-    }
+    // Never save local blob: URLs to database
+    const validRemoteImageUrl =
+      data.imageUrl && !data.imageUrl.startsWith("blob:") ? data.imageUrl.trim() : null;
 
     const newPost: Omit<Post, "id"> = {
       authorId: currentProfile.value.id,
@@ -212,11 +208,7 @@ export function usePosts() {
       description: data.description.trim(),
       location: data.location.trim(),
       eventDate: data.eventDate,
-      ...(uploaded
-        ? { imageUrl: uploaded.downloadUrl, imagePath: uploaded.storagePath }
-        : data.imageUrl?.trim()
-        ? { imageUrl: data.imageUrl.trim() }
-        : {}),
+      ...(validRemoteImageUrl ? { imageUrl: validRemoteImageUrl } : {}),
       status: "open",
       helpfulCount: 0,
       commentsCount: 0,
@@ -224,25 +216,17 @@ export function usePosts() {
       updatedAt: now
     };
 
-    try {
-      const pending = await resolvePendingSubcategory(data, data.category, data.subCategory);
-      if (pending) newPost.subCategory = pending.name;
-      if (pending?.isNew) {
-        await savePostWithSubcategory(
-          (name) => ({ [`posts/${postId}`]: { ...newPost, subCategory: name } }),
-          pending
-        );
-      } else {
-        await set(newPostRef, newPost);
-      }
-      return postId;
-    } catch (saveError) {
-      // If saving post fails in database, cleanup uploaded Storage image
-      if (uploaded?.storagePath) {
-        await deleteStorageFile(uploaded.storagePath).catch(() => {});
-      }
-      throw saveError;
+    const pending = await resolvePendingSubcategory(data, data.category, data.subCategory);
+    if (pending) newPost.subCategory = pending.name;
+    if (pending?.isNew) {
+      await savePostWithSubcategory(
+        (name) => ({ [`posts/${postId}`]: { ...newPost, subCategory: name } }),
+        pending
+      );
+    } else {
+      await set(newPostRef, newPost);
     }
+    return postId;
   };
 
   const updatePost = async (postId: string, data: Partial<PostFormData>) => {
@@ -256,12 +240,6 @@ export function usePosts() {
       throw new Error("You can only edit your own posts.");
     }
 
-    const { uploadPostImage, deleteStorageFile } = useStorageUpload();
-    let uploaded: { downloadUrl: string; storagePath: string } | null = null;
-    if (data.imageFile) {
-      uploaded = await uploadPostImage(data.imageFile, currentProfile.value.id, postId);
-    }
-
     const updates: Record<string, any> = {
       updatedAt: Date.now()
     };
@@ -273,46 +251,30 @@ export function usePosts() {
     if (data.location !== undefined) updates.location = data.location.trim();
     if (data.eventDate !== undefined) updates.eventDate = data.eventDate;
 
-    if (uploaded) {
-      updates.imageUrl = uploaded.downloadUrl;
-      updates.imagePath = uploaded.storagePath;
-    } else if (data.removeImage) {
+    if (data.removeImage) {
       updates.imageUrl = null;
       updates.imagePath = null;
-    } else if (data.imageUrl !== undefined) {
+    } else if (data.imageUrl !== undefined && !data.imageUrl?.startsWith("blob:")) {
       updates.imageUrl = data.imageUrl?.trim() || null;
     }
 
-    try {
-      const pending = await resolvePendingSubcategory(
-        data,
-        data.category ?? post.category,
-        data.subCategory === undefined ? post.subCategory : data.subCategory
+    const pending = await resolvePendingSubcategory(
+      data,
+      data.category ?? post.category,
+      data.subCategory === undefined ? post.subCategory : data.subCategory
+    );
+    if (pending) updates.subCategory = pending.name;
+    if (pending?.isNew) {
+      await savePostWithSubcategory(
+        (name) => Object.fromEntries(
+          Object.entries({ ...updates, subCategory: name }).map(([key, value]) => [
+            `posts/${postId}/${key}`, value
+          ])
+        ),
+        pending
       );
-      if (pending) updates.subCategory = pending.name;
-      if (pending?.isNew) {
-        await savePostWithSubcategory(
-          (name) => Object.fromEntries(
-            Object.entries({ ...updates, subCategory: name }).map(([key, value]) => [
-              `posts/${postId}/${key}`, value
-            ])
-          ),
-          pending
-        );
-      } else {
-        await update(dbRef(db, `posts/${postId}`), updates);
-      }
-
-      // If update succeeded, delete old Storage file if it was replaced or removed
-      if ((uploaded || data.removeImage) && post.imagePath && post.imagePath !== uploaded?.storagePath) {
-        await deleteStorageFile(post.imagePath).catch(() => {});
-      }
-    } catch (err) {
-      // If update failed and a new file was uploaded, clean it up
-      if (uploaded?.storagePath) {
-        await deleteStorageFile(uploaded.storagePath).catch(() => {});
-      }
-      throw err;
+    } else {
+      await update(dbRef(db, `posts/${postId}`), updates);
     }
   };
 
@@ -340,14 +302,6 @@ export function usePosts() {
     if (!post) throw new Error("Post not found.");
     if (post.authorId !== currentProfile.value.id) {
       throw new Error("You can only delete your own posts.");
-    }
-
-    // If post.imagePath exists, delete Storage file too
-    if (post.imagePath) {
-      const { deleteStorageFile } = useStorageUpload();
-      await deleteStorageFile(post.imagePath).catch((err) => {
-        console.warn("Could not delete post image from storage:", err);
-      });
     }
 
     // Remove from posts node

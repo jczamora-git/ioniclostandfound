@@ -303,11 +303,11 @@ const handleCreate = async (data: PostFormData) => {
 }
 
 .profile-container {
-  padding: 0 16px 100px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 100px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 600px;
+  max-width: var(--max-content-width, 600px);
   margin: 0 auto;
 }
 

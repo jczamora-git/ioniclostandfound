@@ -1,23 +1,22 @@
 <template>
   <ion-page>
-    <ion-header :translucent="true" class="ios-public-header">
-      <ion-toolbar class="ios-toolbar">
-        <ion-buttons slot="start">
-          <ion-back-button default-href="/tabs/home" text="" />
-        </ion-buttons>
-        <ion-title class="ios-header-title">Member Profile</ion-title>
-      </ion-toolbar>
-    </ion-header>
-
     <ion-content :fullscreen="true" class="public-content">
-      <div v-if="loading" class="public-loading">
-        <ion-spinner name="crescent" />
-        <span>Loading member profile...</span>
-      </div>
+      <div class="ios-screen-container public-container">
+        <!-- Unified Header with Back Navigation matching Edit Profile -->
+        <PageHeader
+          title="Member Profile"
+          :show-back="true"
+          default-back-url="/tabs/home"
+        />
 
-      <div v-else class="ios-screen-container public-container">
-        <!-- Profile Identity Card -->
-        <header class="public-hero-card">
+        <div v-if="loading" class="public-loading">
+          <ion-spinner name="crescent" />
+          <span>Loading member profile...</span>
+        </div>
+
+        <template v-else>
+          <!-- Profile Identity Card -->
+          <header class="public-hero-card">
           <UserAvatar
             :name="profile?.name || authorNameFallback"
             :username="profile?.username || authorUsernameFallback"
@@ -51,6 +50,19 @@
               <span class="stat-label">Resolved</span>
             </div>
           </div>
+
+          <!-- Message User Action (Only when viewing another user's profile) -->
+          <button
+            v-if="!isOwnProfile"
+            type="button"
+            class="message-user-btn"
+            :disabled="creatingChat"
+            @click="handleMessageUser"
+          >
+            <ion-spinner v-if="creatingChat" name="crescent" class="chat-spinner" />
+            <MessageCircle v-else :size="16" class="message-user-icon" />
+            <span>Message User</span>
+          </button>
         </header>
 
         <!-- Member Posts Section Header & Filter Pills -->
@@ -93,6 +105,7 @@
             @share="handleShare"
           />
         </div>
+        </template>
       </div>
     </ion-content>
   </ion-page>
@@ -100,39 +113,46 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
-  IonBackButton,
-  IonButtons,
   IonContent,
-  IonHeader,
   IonPage,
   IonSpinner,
-  IonTitle,
-  IonToolbar,
   toastController
 } from "@ionic/vue";
 import {
   LayoutGrid,
   CircleHelp,
   SearchCheck,
-  FileText
+  FileText,
+  MessageCircle
 } from "lucide-vue-next";
 import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
+import PageHeader from "../components/PageHeader.vue";
+import { auth } from "../firebase";
 import { useAuth } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
+import { createOrGetConversation } from "../composables/useConversations";
 import type { Post } from "../types/post";
 import type { Profile } from "../types/profile";
 
 const route = useRoute();
-const { getPublicProfile } = useAuth();
+const router = useRouter();
+const { getPublicProfile, currentProfile } = useAuth();
 const { posts, toggleHelpful, isHelpfulByMe } = usePosts();
 
 const uid = computed(() => route.params.uid as string);
 const profile = ref<Omit<Profile, "phone"> | null>(null);
 const loading = ref(true);
+const creatingChat = ref(false);
 const activeTab = ref<"Posts" | "Lost" | "Found">("Posts");
+
+const isOwnProfile = computed(() => {
+  const currentUid = auth.currentUser?.uid || currentProfile.value?.id;
+  if (!currentUid || !uid.value) return false;
+  return currentUid === uid.value;
+});
 
 interface ProfileTabItem {
   value: "Posts" | "Lost" | "Found";
@@ -205,21 +225,76 @@ const handleShare = async (post: Post) => {
     // ignore
   }
 };
+
+const handleMessageUser = async () => {
+  const currentUser = auth.currentUser;
+  if (!currentUser?.uid) {
+    console.error('[PublicProfile] Auth missing when attempting to message user.');
+    const toast = await toastController.create({
+      message: 'Please sign in to message this user.',
+      duration: 2500,
+      position: 'top',
+      color: 'warning'
+    });
+    await toast.present();
+    return;
+  }
+
+  if (isOwnProfile.value || uid.value === currentUser.uid) {
+    console.warn('[PublicProfile] Cannot message own profile.');
+    const toast = await toastController.create({
+      message: 'Unable to start conversation.',
+      duration: 2500,
+      position: 'top',
+      color: 'medium'
+    });
+    await toast.present();
+    return;
+  }
+
+  const targetUid = uid.value;
+  if (!targetUid || typeof targetUid !== 'string' || targetUid.trim() === '') {
+    console.error('[PublicProfile] Target profile UID missing or invalid.');
+    const toast = await toastController.create({
+      message: 'Unable to start conversation.',
+      duration: 2500,
+      position: 'top',
+      color: 'danger'
+    });
+    await toast.present();
+    return;
+  }
+
+  creatingChat.value = true;
+  try {
+    const conv = await createOrGetConversation({
+      otherUserId: targetUid,
+      postId: null
+    });
+
+    if (conv && conv.id) {
+      await router.push(`/chat/${conv.id}`);
+    } else {
+      throw new Error('Unable to start conversation.');
+    }
+  } catch (err: any) {
+    console.error('[PublicProfile] Failed to start conversation with user:', err);
+    const toast = await toastController.create({
+      message: err.message || 'Unable to start conversation.',
+      duration: 3000,
+      position: 'top',
+      color: 'danger'
+    });
+    await toast.present();
+  } finally {
+    creatingChat.value = false;
+  }
+};
 </script>
 
 <style scoped>
 .public-content {
   --background: var(--app-bg);
-}
-
-.ios-toolbar {
-  --background: var(--app-dock-bg);
-  --backdrop-filter: blur(20px);
-}
-
-.ios-header-title {
-  font-size: 17px;
-  font-weight: 600;
 }
 
 .public-loading {
@@ -233,11 +308,11 @@ const handleShare = async (post: Post) => {
 }
 
 .public-container {
-  padding: 16px 16px 40px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 40px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 680px;
+  max-width: var(--max-content-width, 600px);
   margin: 0 auto;
   width: 100%;
 }
@@ -285,6 +360,47 @@ const handleShare = async (post: Post) => {
   border-radius: 16px;
   border: 1px solid var(--app-card-border);
   margin-top: 4px;
+}
+
+.message-user-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  border-radius: 10px;
+  background-color: var(--app-primary);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.message-user-btn:hover {
+  background-color: var(--app-primary-deep, #0e4a9e);
+}
+
+.message-user-btn:active {
+  opacity: 0.85;
+}
+
+.message-user-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.message-user-icon {
+  flex-shrink: 0;
+}
+
+.chat-spinner {
+  width: 16px;
+  height: 16px;
+  --color: #ffffff;
 }
 
 .stat-box {

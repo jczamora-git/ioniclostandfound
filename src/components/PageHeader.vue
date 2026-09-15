@@ -1,5 +1,5 @@
 <template>
-  <header class="app-page-header" :class="{ 'is-compact': compact || subtitle }">
+  <header class="app-page-header">
     <div class="header-left">
       <button
         v-if="showBack"
@@ -11,12 +11,12 @@
         <ArrowLeft :size="22" />
       </button>
       <div class="header-title-box">
-        <h1 class="header-title">{{ title }}</h1>
+        <h1 class="header-title" :class="{ 'has-subtitle': !!subtitle }">{{ title }}</h1>
         <span v-if="subtitle" class="header-subtitle">{{ subtitle }}</span>
       </div>
     </div>
 
-    <div v-if="$slots.action" class="header-right">
+    <div v-if="$slots.action" class="header-actions-wrap">
       <slot name="action" />
     </div>
   </header>
@@ -31,12 +31,10 @@ const props = withDefaults(
     title: string;
     subtitle?: string;
     showBack?: boolean;
-    compact?: boolean;
     defaultBackUrl?: string;
   }>(),
   {
-    showBack: false,
-    compact: false
+    showBack: false
   }
 );
 
@@ -58,43 +56,23 @@ const handleBack = () => {
 
 <style scoped>
 .app-page-header {
+  width: 100%;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  height: 60px;
-  background-color: var(--app-surface);
   border-bottom: 1px solid var(--app-card-border);
-  position: sticky;
-  top: 0;
-  z-index: 20;
+  padding-bottom: 8px;
+  background: transparent;
+  box-sizing: border-box;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-}
-
-.header-back-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin-left: -8px;
-  background: transparent;
-  border: none;
-  color: var(--app-text-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background-color 0.15s ease;
-}
-
-.header-back-btn:active {
-  background-color: var(--app-surface-secondary);
+  flex: 1;
 }
 
 .header-title-box {
@@ -103,36 +81,62 @@ const handleBack = () => {
   min-width: 0;
 }
 
+.header-back-btn {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--app-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  margin-left: -10px;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.header-back-btn:active {
+  opacity: 0.7;
+  background-color: var(--app-surface-secondary);
+}
+
 .header-title {
   margin: 0;
   font-size: 26px;
   font-weight: 700;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.5px;
   color: var(--app-text-primary);
-  line-height: 1.15;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.is-compact .header-title {
-  font-size: 17px;
-  font-weight: 700;
+.header-title.has-subtitle {
+  font-size: 18px;
+  line-height: 1.2;
 }
 
 .header-subtitle {
   font-size: 12px;
   color: var(--app-text-secondary);
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.2;
   margin-top: 1px;
 }
 
-.header-right {
+.header-actions-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  margin-left: 12px;
   flex-shrink: 0;
 }
 </style>

@@ -1,10 +1,9 @@
 <template>
   <ion-page>
     <ion-content :fullscreen="true" class="edit-content">
-      <!-- Unified Header with Back Navigation -->
-      <PageHeader title="Edit Profile" :show-back="true" default-back-url="/tabs/profile" />
-
       <div class="ios-screen-container edit-container">
+        <!-- Unified Header with Back Navigation -->
+        <PageHeader title="Edit Profile" :show-back="true" default-back-url="/tabs/profile" />
         <!-- Avatar Preview and Actions -->
         <div class="avatar-preview-section">
           <UserAvatar
@@ -34,6 +33,7 @@
               <span>Remove Photo</span>
             </button>
           </div>
+          <span class="photo-disabled-hint">Photo upload is not available yet.</span>
           <input
             ref="fileInputRef"
             type="file"
@@ -126,12 +126,11 @@ import { AlertCircle, Camera, Trash2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import UserAvatar from "../components/UserAvatar.vue";
 import { normalizeUsername, useAuth } from "../composables/useAuth";
-import { useStorageUpload } from "../composables/useStorageUpload";
+import { validateImageFile } from "../utils/fileValidation";
 import type { ProfileFormData } from "../types/profile";
 
 const router = useRouter();
 const { currentProfile, saveProfile, checkUsernameAvailable } = useAuth();
-const { uploadAvatar, deleteStorageFile, validateImageFile } = useStorageUpload();
 
 const form = reactive({
   name: "",
@@ -247,37 +246,18 @@ const handleSave = async () => {
 
   saving.value = true;
   globalError.value = "";
-  let uploadedAvatar: { downloadUrl: string; storagePath: string } | null = null;
 
   try {
-    const uid = currentProfile.value?.id;
-    if (selectedFile.value && uid) {
-      uploadedAvatar = await uploadAvatar(selectedFile.value, uid);
-    }
-
-    const previousAvatarPath = currentProfile.value?.avatarPath;
-
     const payload: ProfileFormData = {
       name: form.name.trim(),
       username: normalizeUsername(form.username),
       phone: form.phone.trim(),
-      ...(uploadedAvatar
-        ? { avatarUrl: uploadedAvatar.downloadUrl, avatarPath: uploadedAvatar.storagePath }
-        : removeAvatar.value
-        ? { avatarUrl: null, avatarPath: null }
-        : {})
+      // Keep existing avatar unchanged
+      ...(currentProfile.value?.avatarUrl ? { avatarUrl: currentProfile.value.avatarUrl } : {}),
+      ...(currentProfile.value?.avatarPath ? { avatarPath: currentProfile.value.avatarPath } : {})
     };
 
     await saveProfile(payload);
-
-    // If avatar was replaced or removed, delete previous Storage file gracefully
-    if (
-      (uploadedAvatar || removeAvatar.value) &&
-      previousAvatarPath &&
-      previousAvatarPath !== uploadedAvatar?.storagePath
-    ) {
-      await deleteStorageFile(previousAvatarPath);
-    }
 
     const toast = await toastController.create({
       message: "Profile updated successfully.",
@@ -290,10 +270,6 @@ const handleSave = async () => {
     router.replace("/tabs/profile");
   } catch (err: any) {
     console.error("Update profile error:", err);
-    // If upload succeeded but save failed, clean up uploaded file
-    if (uploadedAvatar?.storagePath) {
-      await deleteStorageFile(uploadedAvatar.storagePath);
-    }
     globalError.value = err.message || "Failed to save profile.";
   } finally {
     saving.value = false;
@@ -336,6 +312,17 @@ const handleSave = async () => {
   cursor: not-allowed;
 }
 
+.avatar-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.photo-disabled-hint {
+  font-size: 11px;
+  color: var(--app-text-tertiary);
+  margin-top: -4px;
+}
+
 .btn-spinner {
   width: 18px;
   height: 18px;
@@ -343,11 +330,11 @@ const handleSave = async () => {
 }
 
 .edit-container {
-  padding: 16px 16px 40px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 40px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  max-width: 600px;
+  gap: 16px;
+  max-width: var(--max-content-width, 600px);
   margin: 0 auto;
   width: 100%;
 }

@@ -140,7 +140,7 @@
           >
             <ion-spinner v-if="creatingChat" name="crescent" class="chat-spinner" />
             <SendHorizontal v-else :size="17" />
-            <span>Message</span>
+            <span>Message Poster</span>
           </button>
 
           <button type="button" class="thread-action-btn" @click="handleShare">
@@ -225,10 +225,11 @@ import UserAvatar from "../components/UserAvatar.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import CommentList from "../components/CommentList.vue";
 import CommentComposer from "../components/CommentComposer.vue";
+import { auth } from "../firebase";
 import { useAuth } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useComments } from "../composables/useComments";
-import { useChatSocket } from "../composables/useChatSocket";
+import { createOrGetConversation } from "../composables/useConversations";
 import { hasValidDescription, type Post } from "../types/post";
 
 const route = useRoute();
@@ -236,7 +237,6 @@ const router = useRouter();
 const { currentProfile } = useAuth();
 const { getPostById, deletePost, resolvePost, toggleHelpful, isHelpfulByMe } = usePosts();
 const { comments, commentsLoading, subscribeToComments, stopCommentsSubscription, addComment, deleteComment } = useComments();
-const { createOrGetConversation } = useChatSocket();
 
 const postId = computed(() => route.params.id as string);
 const post = ref<Post | null>(null);
@@ -251,8 +251,9 @@ const showGeneralActionSheet = ref(false);
 const showDeleteAlert = ref(false);
 
 const isOwner = computed(() => {
-  if (!post.value || !currentProfile.value) return false;
-  return post.value.authorId === currentProfile.value.id;
+  const currentUid = auth.currentUser?.uid || currentProfile.value?.id;
+  if (!post.value || !currentUid) return false;
+  return post.value.authorId === currentUid;
 });
 
 const handleMoreOptions = () => {
@@ -264,15 +265,61 @@ const handleMoreOptions = () => {
 };
 
 const handleMessagePoster = async () => {
-  if (!post.value || isOwner.value || creatingChat.value) return;
+  if (!post.value || creatingChat.value) return;
+
+  const currentUser = auth.currentUser;
+  if (!currentUser?.uid) {
+    console.error("[PostDetails] Auth missing when attempting to message poster.");
+    const toast = await toastController.create({
+      message: "Please sign in to message the poster.",
+      duration: 2500,
+      position: "top",
+      color: "warning"
+    });
+    await toast.present();
+    return;
+  }
+
+  if (isOwner.value || post.value.authorId === currentUser.uid) {
+    console.warn("[PostDetails] Cannot message on own post.");
+    const toast = await toastController.create({
+      message: "Unable to start conversation.",
+      duration: 2500,
+      position: "top",
+      color: "medium"
+    });
+    await toast.present();
+    return;
+  }
+
+  const targetAuthorId = post.value.authorId;
+  if (!targetAuthorId || typeof targetAuthorId !== "string") {
+    console.error("[PostDetails] Post author ID is missing or invalid.");
+    const toast = await toastController.create({
+      message: "Unable to start conversation.",
+      duration: 2500,
+      position: "top",
+      color: "danger"
+    });
+    await toast.present();
+    return;
+  }
+
   creatingChat.value = true;
   try {
-    const conv = await createOrGetConversation(post.value.id, post.value.authorId);
-    router.push(`/chat/${conv.id}`);
+    const conv = await createOrGetConversation({
+      otherUserId: targetAuthorId,
+      postId: post.value.id
+    });
+    if (conv?.id) {
+      await router.push(`/chat/${conv.id}`);
+    } else {
+      throw new Error("Unable to start conversation.");
+    }
   } catch (err: any) {
-    console.error("Failed to start private chat:", err);
+    console.error("[PostDetails] Failed to start conversation with poster:", err);
     const toast = await toastController.create({
-      message: err.message || "Failed to start private chat.",
+      message: err.message || "Unable to start conversation.",
       duration: 3000,
       position: "top",
       color: "danger"
@@ -543,11 +590,11 @@ const deleteAlertButtons = [
 }
 
 .details-container {
-  padding: 0 16px 36px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 36px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 640px;
+  max-width: var(--max-content-width, 600px);
   margin: 0 auto;
   width: 100%;
 }

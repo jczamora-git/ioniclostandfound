@@ -97,6 +97,22 @@
         <span>Share</span>
       </button>
     </footer>
+
+    <!-- Latest Comment Preview (Single most recent comment, max 2 lines) -->
+    <div
+      v-if="latestComment"
+      class="latest-comment-preview"
+      role="button"
+      tabindex="0"
+      aria-label="View latest comment"
+      @click.stop="handleCommentClick"
+    >
+      <p class="comment-preview-text">
+        <span class="comment-author-name">{{ latestComment.authorName }}</span>
+        <span class="comment-body-text">{{ latestComment.content }}</span>
+        <span v-if="commentRelativeTime" class="comment-time">· {{ commentRelativeTime }}</span>
+      </p>
+    </div>
   </article>
 </template>
 
@@ -114,6 +130,7 @@ import {
 import UserAvatar from "./UserAvatar.vue";
 import StatusBadge from "./StatusBadge.vue";
 import { hasValidDescription, type Post } from "../types/post";
+import { useLatestComment } from "../composables/useLatestComment";
 
 const props = defineProps<{
   post: Post;
@@ -127,6 +144,20 @@ defineEmits<{
 
 const router = useRouter();
 const imageFailed = ref(false);
+
+const { latestComment } = useLatestComment(() => props.post.id);
+
+const commentRelativeTime = computed(() => {
+  if (!latestComment.value?.createdAt) return "";
+  const diffSec = Math.floor((Date.now() - latestComment.value.createdAt) / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d`;
+});
 
 const showDescription = computed(() => hasValidDescription(props.post.description));
 
@@ -363,5 +394,46 @@ const handleCommentClick = () => {
 .action-count {
   font-size: 12px;
   font-weight: 600;
+}
+
+/* Latest Comment Preview */
+.latest-comment-preview {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--app-card-border);
+  cursor: pointer;
+}
+
+.latest-comment-preview:active .comment-preview-text {
+  opacity: 0.75;
+}
+
+.comment-preview-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--app-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.comment-author-name {
+  font-weight: 600;
+  color: var(--app-text-primary);
+  margin-right: 6px;
+}
+
+.comment-body-text {
+  color: var(--app-text-secondary);
+}
+
+.comment-time {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--app-text-tertiary);
+  white-space: nowrap;
 }
 </style>

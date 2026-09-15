@@ -29,14 +29,14 @@ export function useChatSocket() {
    * Request backend to create or get existing 1-to-1 conversation.
    */
   const createOrGetConversation = async (
-    postId: string,
+    postId: string | null | undefined,
     otherUserId: string
   ): Promise<Conversation> => {
     const socket = await initSocket();
     return new Promise((resolve, reject) => {
       socket.emit(
         'conversation:get-or-create',
-        { postId, otherUserId },
+        { postId: postId || null, otherUserId },
         (res: { success: boolean; conversation?: Conversation; error?: string }) => {
           if (res.success && res.conversation) {
             resolve(res.conversation);

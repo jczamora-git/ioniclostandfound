@@ -20,29 +20,33 @@ export function registerConversationHandlers(io: Server, socket: Socket) {
     ) => {
       try {
         const { postId, otherUserId } = payload;
-        if (!postId || !otherUserId) {
-          return callback?.({ success: false, error: 'postId and otherUserId are required' });
+        if (!otherUserId) {
+          return callback?.({ success: false, error: 'otherUserId is required' });
         }
 
         if (otherUserId === currentUid) {
           return callback?.({ success: false, error: 'Cannot create a conversation with yourself' });
         }
 
+        const normalizedPostId = postId && typeof postId === 'string' && postId.trim() !== '' ? postId.trim() : null;
+        const convType: 'post' | 'direct' = normalizedPostId ? 'post' : 'direct';
+
         // Check if conversation already exists
-        let conv = await findConversation(postId, currentUid, otherUserId);
+        let conv = await findConversation(normalizedPostId, currentUid, otherUserId);
         if (!conv) {
           // Create new conversation
           const convId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
           const now = Date.now();
           conv = {
             id: convId,
-            postId,
+            postId: normalizedPostId,
+            type: convType,
             participantIds: [currentUid, otherUserId],
             createdAt: now,
             updatedAt: now
           };
           await saveConversation(conv);
-          console.log(`[Conversation Created] ID: ${conv.id} for post: ${postId}`);
+          console.log(`[Conversation Created] ID: ${conv.id} (${convType}) for post: ${normalizedPostId}`);
         }
 
         // Join room

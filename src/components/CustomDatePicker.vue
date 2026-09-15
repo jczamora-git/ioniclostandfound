@@ -1,5 +1,6 @@
 <template>
   <div class="custom-date-picker-wrap">
+    <!-- Row Button Trigger in form -->
     <button
       type="button"
       class="date-row-btn"
@@ -15,30 +16,29 @@
       </div>
       <div class="row-right">
         <span class="row-value" :class="{ placeholder: !modelValue }">
-          {{ formattedDisplayDate || placeholder }}
+          {{ formattedTriggerDate || placeholder }}
         </span>
         <ChevronRight :size="16" class="row-chevron" />
       </div>
     </button>
     <p v-if="error" class="field-error" role="alert">{{ error }}</p>
 
-    <!-- Custom Calendar Bottom Sheet -->
+    <!-- Custom Date Slider Bottom Sheet -->
     <ion-modal
       :is-open="isOpen"
-      :breakpoints="[0, 0.7, 0.9]"
-      :initial-breakpoint="0.7"
+      :breakpoints="[0, 1]"
+      :initial-breakpoint="1"
       :expand-to-scroll="false"
+      class="date-slider-modal"
       aria-label="Choose a date"
-      class="calendar-modal"
-      @did-dismiss="isOpen = false"
+      @did-dismiss="handleDismiss"
     >
-      <div class="calendar-sheet">
-        <header class="calendar-sheet-header">
-          <div class="header-text-wrap">
+      <div class="date-slider-sheet">
+        <!-- Sheet Header -->
+        <header class="sheet-header">
+          <div class="sheet-header-text">
             <h2 class="sheet-title">Select Date</h2>
-            <span v-if="formattedDisplayDate" class="sheet-sub">
-              {{ formattedDisplayDate }}
-            </span>
+            <span class="sheet-subtitle">Choose from the last 30 days</span>
           </div>
           <button
             type="button"
@@ -50,79 +50,138 @@
           </button>
         </header>
 
-        <div class="calendar-body">
-          <CalendarRoot
-            v-slot="{ grid, weekDays }"
-            :model-value="(internalDate as any)"
-            :locale="'en-US'"
-            class="reka-calendar"
-            @update:model-value="onDateSelected"
-          >
-            <CalendarHeader class="reka-cal-header">
-              <CalendarPrev class="cal-nav-btn" aria-label="Previous month">
-                <ChevronLeft :size="18" />
-              </CalendarPrev>
-              <CalendarHeading class="cal-heading" />
-              <CalendarNext class="cal-nav-btn" aria-label="Next month">
-                <ChevronRight :size="18" />
-              </CalendarNext>
-            </CalendarHeader>
+        <!-- Main Body: Date Visualizer, Slider & Cards -->
+        <div class="sheet-body">
+          <!-- Hero Selected Date Card -->
+          <div class="hero-date-card">
+            <div class="hero-top-row">
+              <span class="hero-relative-badge" :class="{ 'is-today': activeDayItem?.daysAgo === 0 }">
+                {{ activeDayItem?.relativeLabel }}
+              </span>
+              <span class="hero-weekday">{{ activeDayItem?.weekdayLong }}</span>
+            </div>
+            <div class="hero-date-text">
+              {{ activeDayItem?.monthLong }} {{ activeDayItem?.dayNumber }}, {{ currentYear }}
+            </div>
+          </div>
 
-            <CalendarGrid
-              v-for="month in grid"
-              :key="month.value.toString()"
-              class="reka-cal-grid"
+          <!-- Interactive Range Slider -->
+          <div class="slider-section">
+            <div class="slider-meta-row">
+              <span class="slider-meta-title">Timeframe</span>
+              <span class="slider-meta-val">
+                {{ activeDayItem?.daysAgo === 0 ? 'Happened Today' : `${activeDayItem?.daysAgo} days ago` }}
+              </span>
+            </div>
+
+            <div class="slider-track-box">
+              <input
+                v-model.number="draftDaysAgo"
+                type="range"
+                min="0"
+                max="30"
+                step="1"
+                class="modern-range-slider"
+                :style="sliderProgressStyle"
+                aria-label="Date slider in days ago"
+              />
+            </div>
+
+            <!-- Ticks along the slider -->
+            <div class="slider-ticks-row">
+              <button
+                type="button"
+                class="tick-btn"
+                :class="{ active: draftDaysAgo === 0 }"
+                @click="draftDaysAgo = 0"
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                class="tick-btn"
+                :class="{ active: draftDaysAgo === 7 }"
+                @click="draftDaysAgo = 7"
+              >
+                7d
+              </button>
+              <button
+                type="button"
+                class="tick-btn"
+                :class="{ active: draftDaysAgo === 14 }"
+                @click="draftDaysAgo = 14"
+              >
+                14d
+              </button>
+              <button
+                type="button"
+                class="tick-btn"
+                :class="{ active: draftDaysAgo === 21 }"
+                @click="draftDaysAgo = 21"
+              >
+                21d
+              </button>
+              <button
+                type="button"
+                class="tick-btn"
+                :class="{ active: draftDaysAgo === 30 }"
+                @click="draftDaysAgo = 30"
+              >
+                30d ago
+              </button>
+            </div>
+          </div>
+
+          <!-- Horizontal Day Cards Carousel -->
+          <div class="day-carousel-section">
+            <div ref="cardsTrackEl" class="day-cards-track">
+              <button
+                v-for="item in daysList"
+                :key="item.daysAgo"
+                :ref="(el) => setCardRef(el, item.daysAgo)"
+                type="button"
+                class="day-card"
+                :class="{ active: draftDaysAgo === item.daysAgo }"
+                :aria-pressed="draftDaysAgo === item.daysAgo"
+                @click="draftDaysAgo = item.daysAgo"
+              >
+                <span class="card-weekday">{{ item.weekdayShort }}</span>
+                <span class="card-number">{{ item.dayNumber }}</span>
+                <span class="card-month">{{ item.monthShort }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Presets -->
+          <div class="presets-row">
+            <button
+              v-for="p in presets"
+              :key="p.days"
+              type="button"
+              class="preset-chip"
+              :class="{ active: draftDaysAgo === p.days }"
+              @click="draftDaysAgo = p.days"
             >
-              <CalendarGridHead>
-                <CalendarGridRow class="reka-cal-weekdays-row">
-                  <CalendarHeadCell
-                    v-for="day in weekDays"
-                    :key="day"
-                    class="reka-cal-weekday"
-                  >
-                    {{ day }}
-                  </CalendarHeadCell>
-                </CalendarGridRow>
-              </CalendarGridHead>
-
-              <CalendarGridBody>
-                <CalendarGridRow
-                  v-for="(weekDates, weekIdx) in month.rows"
-                  :key="`week-${weekIdx}`"
-                  class="reka-cal-days-row"
-                >
-                  <CalendarCell
-                    v-for="weekDate in weekDates"
-                    :key="weekDate.toString()"
-                    :date="weekDate"
-                    class="reka-cal-cell"
-                  >
-                    <CalendarCellTrigger
-                      :day="weekDate"
-                      :month="month.value"
-                      class="reka-cal-trigger"
-                    />
-                  </CalendarCell>
-                </CalendarGridRow>
-              </CalendarGridBody>
-            </CalendarGrid>
-          </CalendarRoot>
+              {{ p.label }}
+            </button>
+          </div>
         </div>
 
-        <footer class="calendar-sheet-footer">
+        <!-- Sticky Footer Action Buttons -->
+        <footer class="sheet-footer">
           <button
             type="button"
-            class="footer-action-btn quick-today-btn"
-            @click="selectToday"
+            class="footer-btn cancel-btn"
+            @click="isOpen = false"
           >
-            Today
+            Cancel
           </button>
           <button
             type="button"
-            class="footer-action-btn done-btn"
-            @click="isOpen = false"
+            class="footer-btn confirm-btn"
+            @click="confirmSelection"
           >
-            Done
+            Apply Date
           </button>
         </footer>
       </div>
@@ -131,34 +190,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch, type ComponentPublicInstance } from "vue";
 import { IonModal } from "@ionic/vue";
 import {
   CalendarDays,
   ChevronRight,
-  ChevronLeft,
   X
 } from "lucide-vue-next";
-import {
-  CalendarRoot,
-  CalendarHeader,
-  CalendarHeading,
-  CalendarPrev,
-  CalendarNext,
-  CalendarGrid,
-  CalendarGridHead,
-  CalendarGridRow,
-  CalendarHeadCell,
-  CalendarGridBody,
-  CalendarCell,
-  CalendarCellTrigger
-} from "reka-ui";
-import {
-  parseDate,
-  today,
-  getLocalTimeZone,
-  type DateValue
-} from "@internationalized/date";
+
+interface DayItem {
+  daysAgo: number;
+  iso: string;
+  dayNumber: number;
+  monthShort: string;
+  monthLong: string;
+  weekdayShort: string;
+  weekdayLong: string;
+  relativeLabel: string;
+  formattedDisplay: string;
+}
 
 const props = withDefaults(
   defineProps<{
@@ -181,60 +231,150 @@ const emit = defineEmits<{
 }>();
 
 const isOpen = ref(false);
+const draftDaysAgo = ref(0);
+const cardsTrackEl = ref<HTMLElement | null>(null);
+const cardRefs = new Map<number, HTMLElement>();
 
-const parseToDateValue = (str: string): DateValue | undefined => {
-  if (!str) return undefined;
-  try {
-    return parseDate(str);
-  } catch {
-    return undefined;
+const setCardRef = (el: Element | ComponentPublicInstance | null, days: number) => {
+  if (el instanceof HTMLElement) {
+    cardRefs.set(days, el);
+  } else {
+    cardRefs.delete(days);
   }
 };
 
-const internalDate = ref<DateValue | undefined>(parseToDateValue(props.modelValue));
+// Generate 31 day items (0 = Today down to 30 = 30 days ago)
+const generateDaysList = (): DayItem[] => {
+  const list: DayItem[] = [];
+  const now = new Date();
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-watch(
-  () => props.modelValue,
-  (newVal) => {
-    internalDate.value = parseToDateValue(newVal);
+  for (let i = 0; i <= 30; i++) {
+    const d = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - i);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const iso = `${y}-${m}-${day}`;
+
+    const dayNumber = d.getDate();
+    const monthShort = d.toLocaleDateString("en-US", { month: "short" });
+    const monthLong = d.toLocaleDateString("en-US", { month: "long" });
+    const weekdayShort = d.toLocaleDateString("en-US", { weekday: "short" });
+    const weekdayLong = d.toLocaleDateString("en-US", { weekday: "long" });
+
+    let relativeLabel = `${i} days ago`;
+    if (i === 0) relativeLabel = "Today";
+    else if (i === 1) relativeLabel = "Yesterday";
+
+    const formattedDisplay = d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+
+    list.push({
+      daysAgo: i,
+      iso,
+      dayNumber,
+      monthShort,
+      monthLong,
+      weekdayShort,
+      weekdayLong,
+      relativeLabel,
+      formattedDisplay
+    });
   }
-);
+  return list;
+};
 
-const formattedDisplayDate = computed(() => {
+const daysList = ref<DayItem[]>(generateDaysList());
+
+const currentYear = computed(() => {
+  const d = activeDayItem.value;
+  if (!d) return new Date().getFullYear();
+  return d.iso.split("-")[0];
+});
+
+const getDaysAgoFromIso = (iso: string): number => {
+  if (!iso) return 0;
+  const match = daysList.value.find((item) => item.iso === iso);
+  if (match) return match.daysAgo;
+
+  const parts = iso.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return 0;
+  const target = new Date(parts[0], parts[1] - 1, parts[2]);
+  const now = new Date();
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffMs = todayDate.getTime() - target.getTime();
+  const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  return Math.max(0, Math.min(30, days));
+};
+
+const activeDayItem = computed<DayItem | undefined>(() => {
+  return daysList.value[draftDaysAgo.value] || daysList.value[0];
+});
+
+const sliderProgressStyle = computed(() => {
+  const pct = (draftDaysAgo.value / 30) * 100;
+  return {
+    background: `linear-gradient(to right, var(--app-primary) 0%, var(--app-primary) ${pct}%, var(--app-surface-secondary) ${pct}%, var(--app-surface-secondary) 100%)`
+  };
+});
+
+const presets = [
+  { label: "Today", days: 0 },
+  { label: "Yesterday", days: 1 },
+  { label: "3 days ago", days: 3 },
+  { label: "1 week ago", days: 7 },
+  { label: "2 weeks ago", days: 14 },
+  { label: "30 days ago", days: 30 }
+];
+
+const formattedTriggerDate = computed(() => {
   if (!props.modelValue) return "";
-  try {
-    const parts = props.modelValue.split("-").map(Number);
-    if (parts.length === 3 && !parts.some(isNaN)) {
-      const [year, month, day] = parts;
-      const d = new Date(year, month - 1, day);
-      return d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric"
-      });
-    }
-  } catch {
-    // fallback
+  const match = daysList.value.find((item) => item.iso === props.modelValue);
+  if (match) {
+    if (match.daysAgo === 0) return `Today (${match.formattedDisplay})`;
+    if (match.daysAgo === 1) return `Yesterday (${match.formattedDisplay})`;
+    return match.formattedDisplay;
   }
   return props.modelValue;
 });
 
-const handleOpen = () => {
+const scrollActiveCardIntoView = () => {
+  const el = cardRefs.get(draftDaysAgo.value);
+  if (el && cardsTrackEl.value) {
+    el.scrollIntoView({
+      behavior: "smooth",
+      inline: "center",
+      block: "nearest"
+    });
+  }
+};
+
+watch(draftDaysAgo, () => {
+  scrollActiveCardIntoView();
+});
+
+const handleOpen = async () => {
   if (props.disabled) return;
-  internalDate.value = parseToDateValue(props.modelValue) || today(getLocalTimeZone());
+  // Refresh day list in case day changed
+  daysList.value = generateDaysList();
+  draftDaysAgo.value = getDaysAgoFromIso(props.modelValue);
   isOpen.value = true;
+  await nextTick();
+  setTimeout(scrollActiveCardIntoView, 250);
 };
 
-const onDateSelected = (dateVal: DateValue | undefined) => {
-  if (!dateVal) return;
-  const iso = dateVal.toString();
-  emit("update:modelValue", iso);
+const handleDismiss = () => {
+  isOpen.value = false;
 };
 
-const selectToday = () => {
-  const t = today(getLocalTimeZone());
-  internalDate.value = t;
-  emit("update:modelValue", t.toString());
+const confirmSelection = () => {
+  if (activeDayItem.value) {
+    emit("update:modelValue", activeDayItem.value.iso);
+  }
+  isOpen.value = false;
 };
 </script>
 
@@ -245,6 +385,7 @@ const selectToday = () => {
   width: 100%;
 }
 
+/* Row Trigger Button */
 .date-row-btn {
   display: flex;
   align-items: center;
@@ -316,8 +457,8 @@ const selectToday = () => {
   font-size: 12px;
 }
 
-/* Calendar Modal Sheet */
-.calendar-modal {
+/* Modal Bottom Sheet */
+.date-slider-modal {
   --height: auto;
   --max-height: 90vh;
   --width: 100%;
@@ -325,7 +466,7 @@ const selectToday = () => {
   --border-radius: 24px 24px 0 0;
 }
 
-.calendar-sheet {
+.date-slider-sheet {
   display: flex;
   flex-direction: column;
   background: var(--app-surface);
@@ -333,7 +474,8 @@ const selectToday = () => {
   padding-bottom: max(16px, env(safe-area-inset-bottom, 16px));
 }
 
-.calendar-sheet-header {
+/* Header */
+.sheet-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -341,7 +483,7 @@ const selectToday = () => {
   border-bottom: 1px solid var(--app-card-border);
 }
 
-.header-text-wrap {
+.sheet-header-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -354,10 +496,10 @@ const selectToday = () => {
   color: var(--app-text-primary);
 }
 
-.sheet-sub {
+.sheet-subtitle {
   font-size: 12px;
-  font-weight: 600;
-  color: var(--app-primary);
+  font-weight: 500;
+  color: var(--app-text-tertiary);
 }
 
 .close-sheet-btn {
@@ -371,167 +513,294 @@ const selectToday = () => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  padding: 0;
 }
 
 .close-sheet-btn:active {
   background: var(--app-surface-secondary);
 }
 
-.calendar-body {
+/* Body */
+.sheet-body {
   padding: 14px 18px 8px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
 }
 
-/* Reka UI Calendar Styling */
-.reka-calendar {
-  width: 100%;
-  max-width: 360px;
-  user-select: none;
+/* Hero Date Card */
+.hero-date-card {
+  background: var(--app-surface-secondary);
+  border: 1px solid var(--app-card-border);
+  border-radius: 16px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.reka-cal-header {
+.hero-top-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 4px 12px;
 }
 
-.cal-heading {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--app-text-primary);
-}
-
-.cal-nav-btn {
-  background: var(--app-surface-secondary);
-  border: 1px solid var(--app-card-border);
-  color: var(--app-text-primary);
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+.hero-relative-badge {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: opacity 0.15s ease;
+  padding: 3px 9px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--app-surface);
+  color: var(--app-text-secondary);
+  border: 1px solid var(--app-card-border);
 }
 
-.cal-nav-btn:active {
-  opacity: 0.6;
+.hero-relative-badge.is-today {
+  background: var(--app-primary);
+  color: #ffffff;
+  border-color: var(--app-primary);
 }
 
-.reka-cal-grid {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.reka-cal-weekdays-row {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  margin-bottom: 6px;
-}
-
-.reka-cal-weekday {
-  text-align: center;
+.hero-weekday {
   font-size: 12px;
   font-weight: 600;
   color: var(--app-text-tertiary);
-  padding: 4px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.reka-cal-days-row {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
-  margin-bottom: 4px;
-}
-
-.reka-cal-cell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-
-.reka-cal-trigger {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: none;
-  background: transparent;
+.hero-date-text {
+  font-size: 18px;
+  font-weight: 700;
   color: var(--app-text-primary);
-  font-size: 13px;
-  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* Slider Section */
+.slider-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.slider-meta-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.slider-meta-title {
+  color: var(--app-text-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.slider-meta-val {
+  color: var(--app-primary);
+  font-weight: 700;
+}
+
+.slider-track-box {
+  width: 100%;
+}
+
+.modern-range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+  margin: 8px 0;
+  border: 1px solid var(--app-card-border);
+}
+
+.modern-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--app-primary);
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.modern-range-slider::-webkit-slider-thumb:active {
+  transform: scale(1.15);
+}
+
+.modern-range-slider::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--app-primary);
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.slider-ticks-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+
+.tick-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-text-tertiary);
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.15s ease;
+}
+
+.tick-btn.active {
+  color: var(--app-primary);
+  font-weight: 700;
+}
+
+/* Day Cards Carousel */
+.day-carousel-section {
+  width: 100%;
+  overflow: hidden;
+}
+
+.day-cards-track {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.day-cards-track::-webkit-scrollbar {
+  display: none;
+}
+
+.day-card {
+  scroll-snap-align: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 64px;
+  border-radius: 12px;
+  border: 1px solid var(--app-card-border);
+  background: var(--app-surface-secondary);
+  color: var(--app-text-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  padding: 6px 0;
+  transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.day-card:active {
+  transform: scale(0.95);
+}
+
+.day-card.active {
+  background: var(--app-primary);
+  border-color: var(--app-primary);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.card-weekday {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  opacity: 0.8;
+}
+
+.card-number {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.card-month {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+/* Presets */
+.presets-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset-chip {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--app-surface-secondary);
+  border: 1px solid var(--app-card-border);
+  color: var(--app-text-secondary);
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.reka-cal-trigger:hover {
-  background: var(--app-surface-secondary);
+.preset-chip.active {
+  background: var(--app-primary);
+  border-color: var(--app-primary);
+  color: #ffffff;
 }
 
-/* Today indicator */
-.reka-cal-trigger[data-today] {
-  border: 1px solid var(--app-primary);
-  font-weight: 600;
-}
-
-/* Selected state */
-.reka-cal-trigger[data-selected] {
-  background: var(--app-primary) !important;
-  color: #ffffff !important;
-  font-weight: 700;
-}
-
-/* Outside current month */
-.reka-cal-trigger[data-outside-view] {
-  opacity: 0.3;
-}
-
-/* Disabled */
-.reka-cal-trigger[data-disabled] {
-  opacity: 0.2;
-  cursor: not-allowed;
-}
-
-.calendar-sheet-footer {
+/* Footer Actions */
+.sheet-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 20px 0;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px 0;
   border-top: 1px solid var(--app-card-border);
 }
 
-.footer-action-btn {
+.footer-btn {
   height: 42px;
   border-radius: 12px;
   font-size: 14px;
   font-weight: 600;
-  cursor: pointer;
   border: none;
+  cursor: pointer;
   transition: opacity 0.15s ease;
 }
 
-.quick-today-btn {
-  background: var(--app-surface-secondary);
-  border: 1px solid var(--app-card-border);
-  color: var(--app-text-primary);
-  padding: 0 18px;
+.footer-btn:active {
+  opacity: 0.7;
 }
 
-.done-btn {
+.cancel-btn {
+  background: var(--app-surface-secondary);
+  border: 1px solid var(--app-card-border);
+  color: var(--app-text-secondary);
+  padding: 0 16px;
+}
+
+.confirm-btn {
   background: var(--app-primary);
   color: #ffffff;
   padding: 0 24px;
   flex: 1;
-}
-
-.footer-action-btn:active {
-  opacity: 0.7;
 }
 </style>

@@ -3,7 +3,8 @@ import type { Profile } from './profile';
 
 export interface Conversation {
   id: string;
-  postId: string;
+  postId?: string | null;
+  type?: 'post' | 'direct';
   participantIds: string[];
   createdAt: number;
   updatedAt: number;

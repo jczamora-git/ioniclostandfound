@@ -79,7 +79,7 @@ export async function verifyToken(token: string): Promise<string> {
  * Find existing conversation for a given postId and two participants.
  */
 export async function findConversation(
-  postId: string,
+  postId: string | null | undefined,
   userA: string,
   userB: string
 ): Promise<Conversation | null> {
@@ -93,8 +93,12 @@ export async function findConversation(
       const cSnap = await adminDb.ref(`conversations/${convId}`).once('value');
       if (cSnap.exists()) {
         const c: Conversation = cSnap.val();
+        const matchesPost = postId
+          ? c.postId === postId
+          : (!c.postId || c.type === 'direct');
         if (
-          c.postId === postId &&
+          matchesPost &&
+          Array.isArray(c.participantIds) &&
           c.participantIds.includes(userA) &&
           c.participantIds.includes(userB)
         ) {
@@ -120,7 +124,8 @@ export async function saveConversation(conv: Conversation): Promise<void> {
   conv.participantIds.forEach((uid) => {
     updates[`userConversations/${uid}/${conv.id}`] = {
       updatedAt: conv.updatedAt,
-      postId: conv.postId
+      postId: conv.postId || null,
+      type: conv.type || (conv.postId ? 'post' : 'direct')
     };
   });
 

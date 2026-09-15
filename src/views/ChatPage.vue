@@ -3,23 +3,30 @@
     <ion-content :fullscreen="true" class="chat-content">
       <div class="chat-view-container">
         <!-- Top Navigation Bar Matching App Header Style -->
-        <PageHeader
-          :title="otherParticipant?.name || 'Chat'"
-          :subtitle="post ? `About: ${post.title}` : undefined"
-          :show-back="true"
-          :compact="true"
-          @back="handleBack"
-        >
-          <template #action>
-            <div class="header-avatar-action" @click="handleOpenProfile">
-              <UserAvatar
-                :name="otherParticipant?.name || 'User'"
-                :username="otherParticipant?.username || 'user'"
-                size="sm"
-              />
-            </div>
-          </template>
-        </PageHeader>
+        <div class="chat-header-wrap">
+          <PageHeader
+            :title="otherParticipant?.name || 'Chat'"
+            :subtitle="headerSubtitle"
+            :show-back="true"
+            @back="handleBack"
+          >
+            <template #action>
+              <button
+                type="button"
+                class="header-icon-btn"
+                aria-label="View user profile"
+                @click="handleOpenProfile"
+              >
+                <UserAvatar
+                  :name="otherParticipant?.name || 'User'"
+                  :username="otherParticipant?.username || 'user'"
+                  :avatar-url="otherParticipant?.avatarUrl"
+                  size="sm"
+                />
+              </button>
+            </template>
+          </PageHeader>
+        </div>
 
         <!-- Post Context Bar (Clickable to post details) -->
         <PostChatContext :post="post" />
@@ -92,7 +99,7 @@ import { useConversations } from '../composables/useConversations';
 import { useAuth } from '../composables/useAuth';
 import { usePosts } from '../composables/usePosts';
 import { ref as dbRef, get } from 'firebase/database';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import type { Post } from '../types/post';
 import type { Profile } from '../types/profile';
 
@@ -119,6 +126,16 @@ const post = ref<Post | null>(null);
 const otherParticipant = ref<Profile | null>(null);
 const sending = ref(false);
 const scrollContainerRef = ref<HTMLDivElement | null>(null);
+
+const headerSubtitle = computed(() => {
+  if (post.value?.title) {
+    return `About: ${post.value.title}`;
+  }
+  if (otherParticipant.value?.username) {
+    return `@${otherParticipant.value.username}`;
+  }
+  return undefined;
+});
 
 const scrollToBottom = (smooth = true) => {
   nextTick(() => {
@@ -150,19 +167,22 @@ onMounted(async () => {
         post.value = await getPostById(convData.postId);
       }
 
+      const myUid = auth.currentUser?.uid || currentProfile.value?.id;
       const otherUid = (convData.participantIds || []).find(
-        (id: string) => id !== currentProfile.value?.id
+        (id: string) => id !== myUid
       );
       if (otherUid) {
         const pSnap = await get(dbRef(db, `profiles/${otherUid}`));
         if (pSnap.exists()) {
+          const pVal = pSnap.val();
           otherParticipant.value = {
             id: otherUid,
-            name: pSnap.val().name || 'Community Member',
-            username: pSnap.val().username || 'user',
+            name: pVal.name || 'Community Member',
+            username: pVal.username || 'user',
             phone: '',
-            createdAt: pSnap.val().createdAt || 0,
-            updatedAt: pSnap.val().updatedAt || 0
+            avatarUrl: pVal.avatarUrl || null,
+            createdAt: pVal.createdAt || 0,
+            updatedAt: pVal.updatedAt || 0
           };
         }
       }
@@ -213,14 +233,36 @@ const handleOpenProfile = () => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 640px;
+  max-width: var(--max-content-width, 600px);
   margin: 0 auto;
 }
 
-.header-avatar-action {
-  cursor: pointer;
+.chat-header-wrap {
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.header-icon-btn {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--app-text-primary);
   display: flex;
   align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  margin-right: -6px;
+  transition: opacity 0.15s ease;
+}
+
+.header-icon-btn:active {
+  opacity: 0.7;
 }
 
 /* Meetup Safety Banner */

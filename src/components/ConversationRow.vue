@@ -9,6 +9,7 @@
       <UserAvatar
         :name="conversation.otherParticipant?.name || 'User'"
         :username="conversation.otherParticipant?.username || 'user'"
+        :avatar-url="conversation.otherParticipant?.avatarUrl"
         size="md"
       />
       <span v-if="conversation.unread" class="unread-badge-dot" aria-label="Unread message"></span>
