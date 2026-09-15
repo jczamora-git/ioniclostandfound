@@ -1,268 +1,292 @@
 <template>
-  <ion-page>
+  <ion-page class="auth-page">
     <ion-content :fullscreen="true" class="auth-content">
-      <div class="ios-screen-container auth-container">
-        <!-- Brand Hero -->
-        <header class="auth-hero">
-          <img
-            src="/lost-and-found.png"
-            alt="Lost &amp; Found Logo"
-            class="auth-logo"
-          />
-          <h1 class="auth-title">Lost &amp; Found</h1>
-          <p class="auth-subtitle">Community item recovery and reconnection platform</p>
-        </header>
-
-        <!-- Segmented Control for Sign In / Create Account -->
-        <div class="auth-toggle-bar" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="mode === 'signin'"
-            class="auth-toggle-btn"
-            :class="{ active: mode === 'signin' }"
-            @click="switchMode('signin')"
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="mode === 'create'"
-            class="auth-toggle-btn"
-            :class="{ active: mode === 'create' }"
-            @click="switchMode('create')"
-          >
-            Create Account
-          </button>
-        </div>
-
-        <!-- Upgrade Notice for Existing Anonymous Users -->
-        <div v-if="mode === 'create' && isAnonymous" class="upgrade-info-box">
-          <ShieldCheck :size="16" class="upgrade-icon" />
-          <span>Your existing posts, comments, and messages will be linked to your new account.</span>
-        </div>
-
-        <!-- Auth Form Card -->
-        <div class="auth-card">
-          <!-- Sign In Form -->
-          <form v-if="mode === 'signin'" @submit.prevent="handleSignIn">
-            <!-- Email -->
-            <div class="form-group">
-              <label class="input-label" for="signin-email">Email</label>
-              <input
-                id="signin-email"
-                v-model="signInForm.email"
-                type="email"
-                class="ios-input"
-                placeholder="name@example.com"
-                autocomplete="email"
-                autocapitalize="none"
-                @input="clearError('signInEmail')"
+      <div class="auth-outer-wrap">
+        <div class="auth-center-container">
+          <!-- VIEW 1: SIGN IN -->
+          <template v-if="view === 'signin'">
+            <!-- Branding Header -->
+            <header class="auth-brand">
+              <img
+                src="/lost-and-found.png"
+                alt="Lost &amp; Found Logo"
+                class="auth-logo"
               />
-              <span v-if="errors.signInEmail" class="input-error">{{ errors.signInEmail }}</span>
-            </div>
+              <h1 class="auth-title">Lost &amp; Found</h1>
+              <p class="auth-subtitle">Community item recovery &amp; reconnection</p>
+            </header>
 
-            <!-- Password -->
-            <div class="form-group">
-              <label class="input-label" for="signin-password">Password</label>
-              <div class="password-input-wrap">
+            <!-- Sign In Form -->
+            <form class="auth-form" @submit.prevent="handleSignIn">
+              <!-- Email -->
+              <div class="form-group">
+                <label class="input-label" for="signin-email">Email</label>
                 <input
-                  id="signin-password"
-                  v-model="signInForm.password"
-                  :type="showSignInPassword ? 'text' : 'password'"
-                  class="ios-input password-input"
-                  placeholder="Enter your password"
-                  autocomplete="current-password"
-                  @input="clearError('signInPassword')"
-                />
-                <button
-                  type="button"
-                  class="pwd-toggle-btn"
-                  :aria-label="showSignInPassword ? 'Hide password' : 'Show password'"
-                  @click="showSignInPassword = !showSignInPassword"
-                >
-                  <EyeOff v-if="showSignInPassword" :size="18" />
-                  <Eye v-else :size="18" />
-                </button>
-              </div>
-              <span v-if="errors.signInPassword" class="input-error">{{ errors.signInPassword }}</span>
-            </div>
-
-            <!-- Global Error Banner -->
-            <div v-if="globalError" class="error-banner">
-              <AlertCircle :size="16" class="error-banner-icon" />
-              <span>{{ globalError }}</span>
-            </div>
-
-            <!-- Submit Button -->
-            <button
-              type="submit"
-              class="auth-action-btn"
-              :disabled="loading"
-            >
-              <ion-spinner v-if="loading" name="crescent" class="btn-spinner" />
-              <span v-else>Sign In</span>
-            </button>
-
-            <!-- Switch Mode Prompt -->
-            <div class="auth-switch-prompt">
-              <span>Don't have an account?</span>
-              <button type="button" class="switch-link-btn" @click="switchMode('create')">
-                Create Account
-              </button>
-            </div>
-          </form>
-
-          <!-- Create Account Form -->
-          <form v-else @submit.prevent="handleCreateAccount">
-            <!-- Full Name -->
-            <div class="form-group">
-              <label class="input-label" for="signup-name">Full Name</label>
-              <input
-                id="signup-name"
-                v-model="signUpForm.name"
-                type="text"
-                class="ios-input"
-                placeholder="e.g., Alex Johnson"
-                autocomplete="name"
-                maxlength="50"
-                @input="clearError('name')"
-              />
-              <span v-if="errors.name" class="input-error">{{ errors.name }}</span>
-            </div>
-
-            <!-- Username -->
-            <div class="form-group">
-              <label class="input-label" for="signup-username">Username</label>
-              <div class="input-with-prefix">
-                <span class="prefix">@</span>
-                <input
-                  id="signup-username"
-                  v-model="signUpForm.username"
-                  type="text"
-                  class="ios-input with-prefix"
-                  placeholder="alexj"
-                  autocomplete="username"
+                  id="signin-email"
+                  v-model="signInForm.email"
+                  type="email"
+                  class="auth-input"
+                  placeholder="name@example.com"
+                  autocomplete="email"
                   autocapitalize="none"
-                  maxlength="30"
-                  @input="handleUsernameInput"
+                  @input="clearError('signInEmail')"
                 />
+                <span v-if="errors.signInEmail" class="input-error">{{ errors.signInEmail }}</span>
               </div>
-              <span class="input-hint">Lowercase letters, numbers, dots, and underscores only</span>
-              <span v-if="errors.username" class="input-error">{{ errors.username }}</span>
-            </div>
 
-            <!-- Phone Number -->
-            <div class="form-group">
-              <label class="input-label" for="signup-phone">Phone Number</label>
-              <input
-                id="signup-phone"
-                v-model="signUpForm.phone"
-                type="tel"
-                class="ios-input"
-                placeholder="e.g., 09123456789"
-                autocomplete="tel"
-                maxlength="20"
-                @input="clearError('phone')"
-              />
-              <span class="input-hint">Private — never visible to other users.</span>
-              <span v-if="errors.phone" class="input-error">{{ errors.phone }}</span>
-            </div>
-
-            <!-- Email -->
-            <div class="form-group">
-              <label class="input-label" for="signup-email">Email</label>
-              <input
-                id="signup-email"
-                v-model="signUpForm.email"
-                type="email"
-                class="ios-input"
-                placeholder="alex@example.com"
-                autocomplete="email"
-                autocapitalize="none"
-                @input="clearError('email')"
-              />
-              <span class="input-hint">Private — used for account sign-in.</span>
-              <span v-if="errors.email" class="input-error">{{ errors.email }}</span>
-            </div>
-
-            <!-- Password -->
-            <div class="form-group">
-              <label class="input-label" for="signup-password">Password</label>
-              <div class="password-input-wrap">
-                <input
-                  id="signup-password"
-                  v-model="signUpForm.password"
-                  :type="showSignUpPassword ? 'text' : 'password'"
-                  class="ios-input password-input"
-                  placeholder="At least 6 characters"
-                  autocomplete="new-password"
-                  @input="clearError('password')"
-                />
-                <button
-                  type="button"
-                  class="pwd-toggle-btn"
-                  :aria-label="showSignUpPassword ? 'Hide password' : 'Show password'"
-                  @click="showSignUpPassword = !showSignUpPassword"
-                >
-                  <EyeOff v-if="showSignUpPassword" :size="18" />
-                  <Eye v-else :size="18" />
-                </button>
+              <!-- Password -->
+              <div class="form-group">
+                <label class="input-label" for="signin-password">Password</label>
+                <div class="password-wrap">
+                  <input
+                    id="signin-password"
+                    v-model="signInForm.password"
+                    :type="showSignInPassword ? 'text' : 'password'"
+                    class="auth-input with-toggle"
+                    placeholder="Enter your password"
+                    autocomplete="current-password"
+                    @input="clearError('signInPassword')"
+                  />
+                  <button
+                    type="button"
+                    class="pwd-toggle-btn"
+                    :aria-label="showSignInPassword ? 'Hide password' : 'Show password'"
+                    @click="showSignInPassword = !showSignInPassword"
+                  >
+                    <EyeOff v-if="showSignInPassword" :size="18" />
+                    <Eye v-else :size="18" />
+                  </button>
+                </div>
+                <span v-if="errors.signInPassword" class="input-error">{{ errors.signInPassword }}</span>
               </div>
-              <span v-if="errors.password" class="input-error">{{ errors.password }}</span>
-            </div>
 
-            <!-- Confirm Password -->
-            <div class="form-group">
-              <label class="input-label" for="signup-confirm-password">Confirm Password</label>
-              <div class="password-input-wrap">
-                <input
-                  id="signup-confirm-password"
-                  v-model="signUpForm.confirmPassword"
-                  :type="showConfirmPassword ? 'text' : 'password'"
-                  class="ios-input password-input"
-                  placeholder="Repeat your password"
-                  autocomplete="new-password"
-                  @input="clearError('confirmPassword')"
-                />
-                <button
-                  type="button"
-                  class="pwd-toggle-btn"
-                  :aria-label="showConfirmPassword ? 'Hide password' : 'Show password'"
-                  @click="showConfirmPassword = !showConfirmPassword"
-                >
-                  <EyeOff v-if="showConfirmPassword" :size="18" />
-                  <Eye v-else :size="18" />
-                </button>
+              <!-- Global Error Banner -->
+              <div v-if="globalError" class="error-banner">
+                <AlertCircle :size="16" class="error-banner-icon" />
+                <span>{{ globalError }}</span>
               </div>
-              <span v-if="errors.confirmPassword" class="input-error">{{ errors.confirmPassword }}</span>
-            </div>
 
-            <!-- Global Error Banner -->
-            <div v-if="globalError" class="error-banner">
-              <AlertCircle :size="16" class="error-banner-icon" />
-              <span>{{ globalError }}</span>
-            </div>
-
-            <!-- Submit Button -->
-            <button
-              type="submit"
-              class="auth-action-btn"
-              :disabled="loading"
-            >
-              <ion-spinner v-if="loading" name="crescent" class="btn-spinner" />
-              <span v-else>Create Account</span>
-            </button>
-
-            <!-- Switch Mode Prompt -->
-            <div class="auth-switch-prompt">
-              <span>Already have an account?</span>
-              <button type="button" class="switch-link-btn" @click="switchMode('signin')">
-                Sign In
+              <!-- Submit Button -->
+              <button
+                type="submit"
+                class="auth-primary-btn"
+                :disabled="loading"
+              >
+                <ion-spinner v-if="loading" name="crescent" class="btn-spinner" />
+                <span v-else>Sign In</span>
               </button>
+
+              <!-- Switch Link -->
+              <div class="auth-switch-prompt">
+                <span>Don't have an account?</span>
+                <button type="button" class="switch-link-btn" @click="switchView('create-profile')">
+                  Create Account
+                </button>
+              </div>
+            </form>
+          </template>
+
+          <!-- VIEW 2: CREATE PROFILE (Step 1 of Create Account) -->
+          <template v-else-if="view === 'create-profile'">
+            <!-- Branding Header -->
+            <header class="auth-brand">
+              <img
+                src="/lost-and-found.png"
+                alt="Lost &amp; Found Logo"
+                class="auth-logo"
+              />
+              <h1 class="auth-title">Lost &amp; Found</h1>
+              <p class="auth-section-title">Create your profile</p>
+            </header>
+
+            <!-- Profile Details Form -->
+            <form class="auth-form" @submit.prevent="handleContinueToAccount">
+              <!-- Full Name -->
+              <div class="form-group">
+                <label class="input-label" for="signup-name">Full Name</label>
+                <input
+                  id="signup-name"
+                  v-model="signUpForm.name"
+                  type="text"
+                  class="auth-input"
+                  placeholder="e.g., Alex Johnson"
+                  autocomplete="name"
+                  maxlength="50"
+                  @input="clearError('name')"
+                />
+                <span v-if="errors.name" class="input-error">{{ errors.name }}</span>
+              </div>
+
+              <!-- Username -->
+              <div class="form-group">
+                <label class="input-label" for="signup-username">Username</label>
+                <div class="input-with-prefix">
+                  <span class="prefix">@</span>
+                  <input
+                    id="signup-username"
+                    v-model="signUpForm.username"
+                    type="text"
+                    class="auth-input with-prefix"
+                    placeholder="alexj"
+                    autocomplete="username"
+                    autocapitalize="none"
+                    maxlength="30"
+                    @input="handleUsernameInput"
+                    @blur="handleUsernameBlur"
+                  />
+                </div>
+                <span v-if="errors.username" class="input-error">{{ errors.username }}</span>
+              </div>
+
+              <!-- Phone Number -->
+              <div class="form-group">
+                <label class="input-label" for="signup-phone">Phone Number</label>
+                <input
+                  id="signup-phone"
+                  v-model="signUpForm.phone"
+                  type="tel"
+                  class="auth-input"
+                  placeholder="e.g., 09123456789"
+                  autocomplete="tel"
+                  maxlength="20"
+                  @input="clearError('phone')"
+                />
+                <span class="input-hint">Private — never visible to other users</span>
+                <span v-if="errors.phone" class="input-error">{{ errors.phone }}</span>
+              </div>
+
+              <!-- Global Error Banner -->
+              <div v-if="globalError" class="error-banner">
+                <AlertCircle :size="16" class="error-banner-icon" />
+                <span>{{ globalError }}</span>
+              </div>
+
+              <!-- Continue Button -->
+              <button
+                type="submit"
+                class="auth-primary-btn"
+                :disabled="loading"
+              >
+                <ion-spinner v-if="loading" name="crescent" class="btn-spinner" />
+                <span v-else>Continue</span>
+              </button>
+
+              <!-- Switch Link -->
+              <div class="auth-switch-prompt">
+                <span>Already have an account?</span>
+                <button type="button" class="switch-link-btn" @click="switchView('signin')">
+                  Sign In
+                </button>
+              </div>
+            </form>
+          </template>
+
+          <!-- VIEW 3: CREATE ACCOUNT (Step 2 of Create Account) -->
+          <template v-else-if="view === 'create-account'">
+            <!-- Step Navigation Header -->
+            <div class="auth-step-header">
+              <button
+                type="button"
+                class="auth-back-btn"
+                aria-label="Back to profile details"
+                @click="goBackToProfile"
+              >
+                <ArrowLeft :size="20" />
+              </button>
+              <div class="auth-step-title-wrap">
+                <h2 class="auth-step-title">Create your account</h2>
+                <p class="auth-step-subtitle">Set your email and password</p>
+              </div>
             </div>
-          </form>
+
+            <!-- Credentials Form -->
+            <form class="auth-form" @submit.prevent="handleCreateAccount">
+              <!-- Email -->
+              <div class="form-group">
+                <label class="input-label" for="signup-email">Email</label>
+                <input
+                  id="signup-email"
+                  v-model="signUpForm.email"
+                  type="email"
+                  class="auth-input"
+                  placeholder="name@example.com"
+                  autocomplete="email"
+                  autocapitalize="none"
+                  @input="clearError('email')"
+                />
+                <span class="input-hint">Private — used for account sign-in</span>
+                <span v-if="errors.email" class="input-error">{{ errors.email }}</span>
+              </div>
+
+              <!-- Password -->
+              <div class="form-group">
+                <label class="input-label" for="signup-password">Password</label>
+                <div class="password-wrap">
+                  <input
+                    id="signup-password"
+                    v-model="signUpForm.password"
+                    :type="showSignUpPassword ? 'text' : 'password'"
+                    class="auth-input with-toggle"
+                    placeholder="At least 6 characters"
+                    autocomplete="new-password"
+                    @input="clearError('password')"
+                  />
+                  <button
+                    type="button"
+                    class="pwd-toggle-btn"
+                    :aria-label="showSignUpPassword ? 'Hide password' : 'Show password'"
+                    @click="showSignUpPassword = !showSignUpPassword"
+                  >
+                    <EyeOff v-if="showSignUpPassword" :size="18" />
+                    <Eye v-else :size="18" />
+                  </button>
+                </div>
+                <span v-if="errors.password" class="input-error">{{ errors.password }}</span>
+              </div>
+
+              <!-- Confirm Password -->
+              <div class="form-group">
+                <label class="input-label" for="signup-confirm-password">Confirm Password</label>
+                <div class="password-wrap">
+                  <input
+                    id="signup-confirm-password"
+                    v-model="signUpForm.confirmPassword"
+                    :type="showConfirmPassword ? 'text' : 'password'"
+                    class="auth-input with-toggle"
+                    placeholder="Repeat your password"
+                    autocomplete="new-password"
+                    @input="clearError('confirmPassword')"
+                  />
+                  <button
+                    type="button"
+                    class="pwd-toggle-btn"
+                    :aria-label="showConfirmPassword ? 'Hide password' : 'Show password'"
+                    @click="showConfirmPassword = !showConfirmPassword"
+                  >
+                    <EyeOff v-if="showConfirmPassword" :size="18" />
+                    <Eye v-else :size="18" />
+                  </button>
+                </div>
+                <span v-if="errors.confirmPassword" class="input-error">{{ errors.confirmPassword }}</span>
+              </div>
+
+              <!-- Global Error Banner -->
+              <div v-if="globalError" class="error-banner">
+                <AlertCircle :size="16" class="error-banner-icon" />
+                <span>{{ globalError }}</span>
+              </div>
+
+              <!-- Submit Button -->
+              <button
+                type="submit"
+                class="auth-primary-btn"
+                :disabled="loading"
+              >
+                <ion-spinner v-if="loading" name="crescent" class="btn-spinner" />
+                <span v-else>Create Account</span>
+              </button>
+            </form>
+          </template>
         </div>
       </div>
     </ion-content>
@@ -270,17 +294,18 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from "vue";
+import { reactive, ref, onMounted, onBeforeUnmount } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { IonContent, IonPage, IonSpinner, toastController } from "@ionic/vue";
-import { Eye, EyeOff, AlertCircle, ShieldCheck } from "lucide-vue-next";
+import { Eye, EyeOff, AlertCircle, ArrowLeft } from "lucide-vue-next";
 import { useAuth, normalizeUsername } from "../composables/useAuth";
 
 const router = useRouter();
 const route = useRoute();
 const { signIn, signUp, isAnonymous, checkUsernameAvailable, currentProfile } = useAuth();
 
-const mode = ref<"signin" | "create">("signin");
+type AuthView = "signin" | "create-profile" | "create-account";
+const view = ref<AuthView>("signin");
 const loading = ref(false);
 const globalError = ref("");
 
@@ -314,12 +339,14 @@ const errors = reactive<Record<string, string>>({
   confirmPassword: ""
 });
 
+let usernameDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 onMounted(() => {
-  // If an anonymous user visits with an unfinished account, default to create mode
+  // If user is anonymous or coming from /onboarding, show profile setup
   if (isAnonymous.value || route.path === "/onboarding") {
-    mode.value = "create";
+    view.value = "create-profile";
   }
-  // Pre-fill existing profile data if available
+  // Pre-fill profile data if present
   if (currentProfile.value) {
     signUpForm.name = currentProfile.value.name || "";
     signUpForm.username = currentProfile.value.username || "";
@@ -327,12 +354,26 @@ onMounted(() => {
   }
 });
 
-const switchMode = (newMode: "signin" | "create") => {
-  mode.value = newMode;
+onBeforeUnmount(() => {
+  if (usernameDebounceTimer) {
+    clearTimeout(usernameDebounceTimer);
+  }
+});
+
+const switchView = (newView: AuthView) => {
+  view.value = newView;
   globalError.value = "";
-  Object.keys(errors).forEach((key) => {
-    errors[key] = "";
+  Object.keys(errors).forEach((k) => {
+    errors[k] = "";
   });
+};
+
+const goBackToProfile = () => {
+  view.value = "create-profile";
+  globalError.value = "";
+  errors.email = "";
+  errors.password = "";
+  errors.confirmPassword = "";
 };
 
 const clearError = (field: string) => {
@@ -343,6 +384,40 @@ const clearError = (field: string) => {
 const handleUsernameInput = () => {
   signUpForm.username = normalizeUsername(signUpForm.username);
   clearError("username");
+
+  // Debounced check — avoid annoying errors while actively typing
+  if (usernameDebounceTimer) {
+    clearTimeout(usernameDebounceTimer);
+  }
+  if (signUpForm.username.length >= 3) {
+    usernameDebounceTimer = setTimeout(async () => {
+      await checkUsernameAvailability();
+    }, 600);
+  }
+};
+
+const handleUsernameBlur = async () => {
+  if (usernameDebounceTimer) {
+    clearTimeout(usernameDebounceTimer);
+  }
+  await checkUsernameAvailability();
+};
+
+const checkUsernameAvailability = async (): Promise<boolean> => {
+  const clean = signUpForm.username.trim();
+  if (!clean || clean.length < 3) return true;
+  try {
+    const isAvail = await checkUsernameAvailable(clean);
+    if (!isAvail) {
+      errors.username = "This username is already taken. Please choose another.";
+      return false;
+    } else if (errors.username === "This username is already taken. Please choose another.") {
+      errors.username = "";
+    }
+    return true;
+  } catch (err) {
+    return true;
+  }
 };
 
 const validateEmail = (email: string): boolean => {
@@ -370,7 +445,7 @@ const validateSignIn = (): boolean => {
   return valid;
 };
 
-const validateSignUp = async (): Promise<boolean> => {
+const validateProfileStep = async (): Promise<boolean> => {
   let valid = true;
   globalError.value = "";
 
@@ -398,6 +473,21 @@ const validateSignUp = async (): Promise<boolean> => {
     valid = false;
   }
 
+  // Validate uniqueness
+  if (valid && signUpForm.username.trim()) {
+    const isAvail = await checkUsernameAvailability();
+    if (!isAvail) {
+      valid = false;
+    }
+  }
+
+  return valid;
+};
+
+const validateAccountStep = (): boolean => {
+  let valid = true;
+  globalError.value = "";
+
   if (!signUpForm.email.trim()) {
     errors.email = "Email is required.";
     valid = false;
@@ -420,15 +510,6 @@ const validateSignUp = async (): Promise<boolean> => {
   } else if (signUpForm.confirmPassword !== signUpForm.password) {
     errors.confirmPassword = "Passwords do not match.";
     valid = false;
-  }
-
-  // Check username uniqueness if fields valid so far
-  if (valid && signUpForm.username.trim()) {
-    const isAvail = await checkUsernameAvailable(signUpForm.username.trim());
-    if (!isAvail) {
-      errors.username = "This username is already taken. Please choose another.";
-      valid = false;
-    }
   }
 
   return valid;
@@ -454,10 +535,22 @@ const handleSignIn = async () => {
   }
 };
 
-const handleCreateAccount = async () => {
-  const isValid = await validateSignUp();
-  if (!isValid || loading.value) return;
+const handleContinueToAccount = async () => {
+  if (loading.value) return;
+  loading.value = true;
+  try {
+    const isValid = await validateProfileStep();
+    if (isValid) {
+      view.value = "create-account";
+      globalError.value = "";
+    }
+  } finally {
+    loading.value = false;
+  }
+};
 
+const handleCreateAccount = async () => {
+  if (!validateAccountStep() || loading.value) return;
   loading.value = true;
   try {
     await signUp({
@@ -469,13 +562,12 @@ const handleCreateAccount = async () => {
     });
 
     const toast = await toastController.create({
-      message: "Account created successfully! Welcome to Lost & Found.",
-      duration: 2500,
+      message: "Account created successfully!",
+      duration: 2000,
       position: "top",
       color: "success"
     });
     await toast.present();
-
     router.replace("/tabs/home");
   } catch (err: any) {
     globalError.value = err.message || "Failed to create account. Please try again.";
@@ -486,171 +578,202 @@ const handleCreateAccount = async () => {
 </script>
 
 <style scoped>
-.auth-content {
-  --background: var(--app-bg);
+.auth-page {
+  --background: var(--app-background, #F7F8FA);
 }
 
-.auth-container {
-  padding: calc(24px + env(safe-area-inset-top, 0px)) 20px 48px;
+.auth-content {
+  --background: var(--app-background, #F7F8FA);
+}
+
+/* Outer layout wrapper - centered vertically on tall screens, scrollable on short */
+.auth-outer-wrap {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   align-items: center;
-  max-width: 480px;
-  margin: 0 auto;
+  box-sizing: border-box;
+  width: 100%;
   min-height: 100%;
+  min-height: 100dvh;
+  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  padding: max(24px, calc(env(safe-area-inset-top, 0px) + 24px)) 24px max(24px, calc(env(safe-area-inset-bottom, 0px) + 24px));
 }
 
-.auth-hero {
+/* Center column container constrained to 380px-420px */
+.auth-center-container {
+  width: 100%;
+  max-width: 400px;
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Branding Header */
+.auth-brand {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 32px;
 }
 
 .auth-logo {
-  width: 80px;
-  height: 80px;
+  width: 70px;
+  height: 70px;
   object-fit: contain;
-  border-radius: 20px;
-  box-shadow: 0 10px 28px rgba(47, 159, 232, 0.25);
   margin-bottom: 12px;
+  filter: drop-shadow(0 4px 12px rgba(47, 159, 232, 0.2));
 }
 
 .auth-title {
   margin: 0;
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: -0.6px;
-  color: var(--app-text-primary);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--app-text-primary, #202124);
 }
 
 .auth-subtitle {
-  margin: 4px 0 0;
+  margin: 6px 0 0 0;
   font-size: 14px;
-  color: var(--app-text-secondary);
-  max-width: 280px;
-  line-height: 1.4;
+  color: var(--app-text-secondary, #72777D);
 }
 
-.auth-toggle-bar {
-  display: flex;
-  width: 100%;
-  background: var(--app-surface-secondary);
-  border-radius: 14px;
-  padding: 4px;
-  margin-bottom: 16px;
-  border: 1px solid var(--app-card-border);
+.auth-section-title {
+  margin: 6px 0 0 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--app-text-secondary, #72777D);
 }
 
-.auth-toggle-btn {
-  flex: 1;
-  height: 38px;
-  border-radius: 10px;
-  border: none;
-  background: transparent;
-  color: var(--app-text-secondary);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.auth-toggle-btn.active {
-  background: var(--app-surface);
-  color: var(--app-text-primary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.upgrade-info-box {
-  width: 100%;
+/* Step 2 Header with Back Button */
+.auth-step-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  background: rgba(47, 159, 232, 0.08);
-  border: 1px solid rgba(47, 159, 232, 0.25);
-  border-radius: 12px;
-  font-size: 12px;
-  color: var(--app-text-primary);
-  line-height: 1.4;
+  gap: 12px;
+  margin-bottom: 28px;
 }
 
-.upgrade-icon {
-  color: var(--app-primary);
-  flex-shrink: 0;
+.auth-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  background: var(--app-input-background, #F2F4F7);
+  border: 1px solid var(--app-border, rgba(20, 25, 30, 0.08));
+  border-radius: 50%;
+  color: var(--app-text-primary, #202124);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+  touch-action: manipulation;
 }
 
-.auth-card {
+.auth-back-btn:active {
+  transform: scale(0.92);
+  background: var(--app-border, rgba(20, 25, 30, 0.12));
+}
+
+.auth-step-title-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-step-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--app-text-primary, #202124);
+}
+
+.auth-step-subtitle {
+  margin: 2px 0 0 0;
+  font-size: 13px;
+  color: var(--app-text-secondary, #72777D);
+}
+
+/* Form Styles */
+.auth-form {
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  background: var(--app-surface);
-  border-radius: 20px;
-  padding: 24px 20px;
-  border: 1px solid var(--app-card-border);
-  box-shadow: var(--app-card-shadow);
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .input-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--app-text-primary);
+  color: var(--app-text-primary, #202124);
+  margin-bottom: 7px;
+  letter-spacing: -0.01em;
 }
 
-.ios-input {
+.auth-input {
   width: 100%;
-  height: 46px;
+  height: 48px;
   padding: 0 14px;
+  background: var(--app-input-background, #F2F4F7);
+  border: 1px solid var(--app-border, rgba(20, 25, 30, 0.08));
   border-radius: 12px;
-  border: 1px solid var(--app-card-border);
-  background: var(--app-input-bg);
-  color: var(--app-text-primary);
   font-size: 15px;
-  box-sizing: border-box;
+  color: var(--app-text-primary, #202124);
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  -webkit-appearance: none;
 }
 
-.ios-input:focus {
-  border-color: var(--app-primary);
-  box-shadow: 0 0 0 3px var(--app-primary-soft);
+.auth-input:focus {
+  border-color: var(--ion-color-primary, #2F9FE8);
+  box-shadow: 0 0 0 3px rgba(47, 159, 232, 0.16);
 }
 
+.auth-input::placeholder {
+  color: var(--app-text-muted, #9AA0A6);
+}
+
+/* Input with @ prefix */
 .input-with-prefix {
-  position: relative;
   display: flex;
   align-items: center;
+  position: relative;
+  width: 100%;
 }
 
-.prefix {
+.input-with-prefix .prefix {
   position: absolute;
   left: 14px;
   font-size: 15px;
   font-weight: 600;
-  color: var(--app-text-secondary);
+  color: var(--app-text-secondary, #72777D);
   pointer-events: none;
-  z-index: 2;
+  user-select: none;
 }
 
-.ios-input.with-prefix {
+.auth-input.with-prefix {
   padding-left: 32px;
 }
 
-.password-input-wrap {
+/* Password with Show/Hide toggle */
+.password-wrap {
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
 }
 
-.password-input {
-  padding-right: 46px;
+.auth-input.with-toggle {
+  padding-right: 44px;
 }
 
 .pwd-toggle-btn {
@@ -658,110 +781,118 @@ const handleCreateAccount = async () => {
   right: 6px;
   top: 50%;
   transform: translateY(-50%);
-  width: 36px;
-  height: 36px;
-  border: none;
-  background: transparent;
-  color: var(--app-text-secondary);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: none;
   border-radius: 8px;
+  color: var(--app-text-secondary, #72777D);
+  cursor: pointer;
   transition: color 0.15s ease;
 }
 
-.pwd-toggle-btn:active {
-  color: var(--app-text-primary);
+.pwd-toggle-btn:hover,
+.pwd-toggle-btn:focus {
+  color: var(--app-text-primary, #202124);
 }
 
+/* Hints & Errors */
 .input-hint {
-  font-size: 11px;
-  color: var(--app-text-tertiary);
-  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--app-text-secondary, #72777D);
+  margin-top: 5px;
 }
 
 .input-error {
   font-size: 12px;
+  color: var(--ion-color-danger, #F04444);
   font-weight: 500;
-  color: var(--ion-color-danger, #ef4444);
-  margin-top: 2px;
+  margin-top: 5px;
 }
 
+/* Error Banner */
 .error-banner {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 10px 12px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.25);
-  border-radius: 12px;
+  padding: 10px 14px;
+  background: rgba(240, 68, 68, 0.08);
+  border: 1px solid rgba(240, 68, 68, 0.2);
+  border-radius: 10px;
+  color: var(--ion-color-danger, #F04444);
   font-size: 13px;
-  color: var(--ion-color-danger, #ef4444);
+  line-height: 1.4;
   margin-bottom: 16px;
 }
 
 .error-banner-icon {
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
-.auth-action-btn {
-  width: 100%;
-  height: 48px;
-  border-radius: 12px;
-  background: var(--app-primary);
-  border: none;
-  color: #ffffff;
-  font-size: 15px;
-  font-weight: 600;
+/* Primary Button */
+.auth-primary-btn {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
+  height: 48px;
+  margin-top: 8px;
+  background: var(--ion-color-primary, #2F9FE8);
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(47, 159, 232, 0.3);
-  transition: all 0.15s ease;
+  box-shadow: 0 4px 14px rgba(47, 159, 232, 0.25);
+  transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+  touch-action: manipulation;
 }
 
-.auth-action-btn:hover {
-  background: var(--app-primary-deep);
+.auth-primary-btn:active:not(:disabled) {
+  transform: scale(0.98);
+  box-shadow: 0 2px 8px rgba(47, 159, 232, 0.2);
 }
 
-.auth-action-btn:active {
-  transform: scale(0.99);
-}
-
-.auth-action-btn:disabled {
-  opacity: 0.55;
+.auth-primary-btn:disabled {
+  opacity: 0.65;
   cursor: not-allowed;
 }
 
 .btn-spinner {
+  --color: #ffffff;
   width: 20px;
   height: 20px;
-  --color: #ffffff;
 }
 
+/* Switch Prompt Link */
 .auth-switch-prompt {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin-top: 18px;
-  font-size: 13px;
-  color: var(--app-text-secondary);
+  margin-top: 24px;
+  font-size: 13.5px;
+  color: var(--app-text-secondary, #72777D);
 }
 
 .switch-link-btn {
+  background: none;
   border: none;
-  background: transparent;
-  color: var(--app-primary);
-  font-weight: 600;
-  font-size: 13px;
-  cursor: pointer;
   padding: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ion-color-primary, #2F9FE8);
+  cursor: pointer;
+  transition: opacity 0.15s ease;
 }
 
-.switch-link-btn:hover {
-  text-decoration: underline;
+.switch-link-btn:active {
+  opacity: 0.7;
 }
 </style>
