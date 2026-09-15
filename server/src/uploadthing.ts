@@ -95,7 +95,31 @@ export const uploadRouter = {
         fileKey: file.key,
         fileUrl
       };
+    }),
+
+  // Message Image Uploader: max 8MB backend limit (validated to 5MB on client), 1 image file
+  messageImageUploader: f({
+    image: {
+      maxFileSize: '8MB',
+      maxFileCount: 1
+    }
+  })
+    .middleware(async ({ req }) => {
+      const auth = await authenticateRequest(req);
+      return { userId: auth.userId };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      const fileUrl = (file as any).ufsUrl || file.url;
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[UploadThing] Message image uploaded by ${metadata.userId} -> Key: ${file.key}, URL: ${fileUrl}`);
+      }
+      return {
+        uploadedBy: metadata.userId,
+        fileKey: file.key,
+        fileUrl
+      };
     })
 } satisfies FileRouter;
 
 export type OurFileRouter = typeof uploadRouter;
+

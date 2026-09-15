@@ -81,6 +81,7 @@
               <div class="notif-line-1">
                 <span class="notif-actor-name">{{ item.actorName }}</span>
                 <span v-if="item.type === 'merit_awarded'" class="notif-action-text merit-text">awarded you a Community Merit 🏅</span>
+                <span v-else-if="item.type === 'reply'" class="notif-action-text">replied to your comment</span>
                 <span v-else class="notif-action-text">commented on your post</span>
               </div>
 

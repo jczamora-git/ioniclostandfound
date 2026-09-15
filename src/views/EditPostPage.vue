@@ -1,5 +1,20 @@
 <template>
   <ion-page>
+    <!-- Fixed Header with Save Action -->
+    <PageHeader title="Edit Post" :show-back="true" :default-back-url="`/post/${postId}`">
+      <template #action>
+        <button
+          type="button"
+          class="header-save-btn"
+          :disabled="saving || isUploading || loading || !post"
+          @click="handleSave"
+        >
+          <ion-spinner v-if="saving || isUploading" name="crescent" class="btn-spinner" />
+          <span v-else>Save</span>
+        </button>
+      </template>
+    </PageHeader>
+
     <ion-content :fullscreen="true" class="edit-post-content">
       <div v-if="loading" class="loading-wrap">
         <ion-spinner name="crescent" />
@@ -11,20 +26,6 @@
       </div>
 
       <div v-else class="ios-screen-container form-container">
-        <PageHeader title="Edit Post" :show-back="true" :default-back-url="`/post/${postId}`">
-          <template #action>
-            <button
-              type="button"
-              class="header-save-btn"
-              :disabled="saving || isUploading || loading || !post"
-              @click="handleSave"
-            >
-              <ion-spinner v-if="saving || isUploading" name="crescent" class="btn-spinner" />
-              <span v-else>Save</span>
-            </button>
-          </template>
-        </PageHeader>
-
         <!-- Post Type Indicator (Read-only for consistency) -->
         <div class="type-banner">
           <span class="type-badge" :class="post.type === 'found' ? 'found' : 'lost'">
@@ -367,7 +368,7 @@ const handleSave = async () => {
 }
 
 .form-container {
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 40px;
+  padding: 16px 16px 40px;
   display: flex;
   flex-direction: column;
   gap: 16px;

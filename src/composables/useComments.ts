@@ -43,7 +43,9 @@ export function useComments() {
               authorUsername: c.authorUsername || "member",
               content: c.content || "",
               createdAt: typeof c.createdAt === "number" ? c.createdAt : Date.now(),
-              updatedAt: typeof c.updatedAt === "number" ? c.updatedAt : Date.now()
+              updatedAt: typeof c.updatedAt === "number" ? c.updatedAt : Date.now(),
+              parentCommentId: c.parentCommentId || null,
+              rootCommentId: c.rootCommentId || null
             });
           });
         }
@@ -61,7 +63,15 @@ export function useComments() {
     unsubscribe = () => unsub();
   };
 
-  const addComment = async (postId: string, content: string): Promise<string> => {
+  const addComment = async (
+    postId: string,
+    content: string,
+    replyOptions?: {
+      parentCommentId?: string | null;
+      rootCommentId?: string | null;
+      parentAuthorId?: string;
+    }
+  ): Promise<string> => {
     if (!currentProfile.value) {
       throw new Error("You must complete your profile to comment.");
     }
@@ -82,12 +92,14 @@ export function useComments() {
       authorUsername: currentProfile.value.username,
       content: cleanContent,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      parentCommentId: replyOptions?.parentCommentId || null,
+      rootCommentId: replyOptions?.rootCommentId || null
     };
 
     await set(newCommentRef, newComment);
 
-    // Update commentsCount on post and notify post author
+    // Update commentsCount on post and notify post author / reply author
     try {
       const postRef = dbRef(db, `posts/${postId}`);
       const snap = await get(postRef);
@@ -96,8 +108,21 @@ export function useComments() {
         const currentCount = postData.commentsCount || 0;
         await update(postRef, { commentsCount: currentCount + 1 });
 
-        if (postData.authorId) {
-          const { createCommentNotification } = useNotifications();
+        const { createCommentNotification, createReplyNotification } = useNotifications();
+
+        // If it's a reply to another comment
+        if (replyOptions?.parentAuthorId) {
+          createReplyNotification({
+            targetAuthorId: replyOptions.parentAuthorId,
+            postId,
+            postTitle: postData.title,
+            commentId,
+            replyText: cleanContent
+          }).catch((err) => console.warn("Failed to deliver reply notification:", err));
+        }
+
+        // Notify post author if post author is not commenter and not the parent comment author (to avoid duplicate notifications)
+        if (postData.authorId && postData.authorId !== replyOptions?.parentAuthorId) {
           createCommentNotification({
             postAuthorId: postData.authorId,
             postId,

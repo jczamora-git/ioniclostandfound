@@ -1,92 +1,102 @@
 <template>
   <ion-page>
+    <!-- Fixed Page Header -->
+    <PageHeader title="My Profile" />
+
     <ion-content :fullscreen="true" class="profile-content">
       <div class="ios-screen-container profile-container">
-        <!-- Unified Left-Aligned Page Header -->
-        <PageHeader title="My Profile" />
-
-        <!-- Profile Identity Section (Flattened, no bulky card) -->
-        <div class="profile-hero-section">
-          <UserAvatar
-            :name="currentProfile?.name"
-            :username="currentProfile?.username"
-            :avatar-url="currentProfile?.avatarUrl"
-            size="xl"
-          />
-          <div class="hero-info">
-            <h1 class="hero-name">{{ currentProfile?.name || 'Community Member' }}</h1>
-            <span class="hero-username">@{{ currentProfile?.username || 'user' }}</span>
+        <!-- Modern Profile Hero Card -->
+        <div class="profile-hero-card">
+          <!-- Cover Area with Blurred Avatar Background -->
+          <div class="profile-cover">
+            <div
+              v-if="currentProfile?.avatarUrl"
+              class="profile-cover-blur"
+              :style="{ backgroundImage: `url(${currentProfile.avatarUrl})` }"
+            ></div>
+            <div v-else class="profile-cover-fallback"></div>
+            <div class="profile-cover-overlay"></div>
           </div>
 
-          <!-- Compact Stats Row (No giant box, clean dividers) -->
-          <div class="stats-row">
-            <div class="stat-box">
-              <span class="stat-number">{{ myPosts.length }}</span>
-              <span class="stat-label">Posts</span>
+          <!-- Hero Card Body (Avatar overlaps cover) -->
+          <div class="profile-card-body">
+            <div class="hero-avatar-wrap">
+              <UserAvatar
+                :name="currentProfile?.name"
+                :username="currentProfile?.username"
+                :avatar-url="currentProfile?.avatarUrl"
+                size="xl"
+              />
             </div>
-            <div class="stat-divider"></div>
-            <div class="stat-box">
-              <span class="stat-number text-danger">{{ lostCount }}</span>
-              <span class="stat-label">Lost</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-box">
-              <span class="stat-number text-success">{{ foundCount }}</span>
-              <span class="stat-label">Found</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-box">
-              <span class="stat-number text-resolved">{{ resolvedCount }}</span>
-              <span class="stat-label">Resolved</span>
-            </div>
-          </div>
 
-          <!-- Edit Profile Button -->
-          <button
-            type="button"
-            class="edit-profile-btn"
-            @click="router.push('/edit-profile')"
-          >
-            <Pencil :size="15" class="edit-profile-icon" />
-            <span>Edit Profile</span>
-          </button>
-        </div>
+            <div class="hero-identity">
+              <h1 class="hero-name">{{ currentProfile?.name || 'Community Member' }}</h1>
+              <span class="hero-username">@{{ currentProfile?.username || 'user' }}</span>
+            </div>
 
-        <!-- Appearance & App Settings Row (Flattened, subtle border) -->
-        <section class="profile-settings-section" aria-label="Account and Appearance settings">
-          <button type="button" class="settings-item-btn" @click="openThemeSelector">
-            <div class="settings-item-left">
-              <div class="settings-icon-bubble">
-                <SunMoon :size="18" />
+            <!-- Clean Inline Stats Row -->
+            <div class="stats-row">
+              <div class="stat-box">
+                <span class="stat-number">{{ myPosts.length }}</span>
+                <span class="stat-label">Posts</span>
               </div>
-              <span class="settings-item-label">Appearance</span>
+              <div class="stat-divider"></div>
+              <div class="stat-box">
+                <span class="stat-number text-danger">{{ lostCount }}</span>
+                <span class="stat-label">Lost</span>
+              </div>
+              <div class="stat-divider"></div>
+              <div class="stat-box">
+                <span class="stat-number text-success">{{ foundCount }}</span>
+                <span class="stat-label">Found</span>
+              </div>
+              <div class="stat-divider"></div>
+              <div class="stat-box">
+                <span class="stat-number text-resolved">{{ resolvedCount }}</span>
+                <span class="stat-label">Resolved</span>
+              </div>
             </div>
-            <div class="settings-item-right">
-              <span class="settings-item-value">{{ currentThemeLabel }}</span>
-              <ChevronRight :size="16" class="settings-chevron" />
-            </div>
-          </button>
 
-          <div class="settings-divider"></div>
+            <!-- Action Row: Edit Profile, Theme Toggle, Sign Out -->
+            <div class="profile-action-row">
+              <button
+                type="button"
+                class="hero-cta-btn"
+                @click="router.push('/edit-profile')"
+              >
+                <Pencil :size="16" class="cta-icon" />
+                <span>Edit Profile</span>
+              </button>
 
-          <button type="button" class="settings-item-btn signout-item-btn" @click="handleSignOut">
-            <div class="settings-item-left">
-              <div class="settings-icon-bubble signout-bubble">
+              <button
+                type="button"
+                class="hero-theme-btn"
+                aria-label="Change theme"
+                :title="themeAriaLabel"
+                @click="cycleTheme"
+              >
+                <Sun v-if="themePreference === 'light'" :size="19" />
+                <Moon v-else-if="themePreference === 'dark'" :size="19" />
+                <Monitor v-else :size="19" />
+              </button>
+
+              <button
+                type="button"
+                class="hero-signout-btn"
+                aria-label="Sign out"
+                title="Sign out"
+                @click="handleSignOut"
+              >
                 <LogOut :size="18" />
-              </div>
-              <span class="settings-item-label text-danger">Sign Out</span>
+              </button>
             </div>
-            <div class="settings-item-right">
-              <ChevronRight :size="16" class="settings-chevron" />
-            </div>
-          </button>
-        </section>
+          </div>
+        </div>
 
         <!-- Achievements Section -->
         <AchievementsSection
           v-if="currentProfile?.id"
           :user-id="currentProfile.id"
-          :is-own-profile="true"
         />
 
         <!-- My Posts Section Header & Filter Pills -->
@@ -106,7 +116,7 @@
               :class="{ active: activeTab === item.value }"
               @click="activeTab = item.value"
             >
-              <component :is="item.icon" :size="15" class="pill-icon" />
+              <component :is="item.icon" :size="14" class="pill-icon" />
               <span class="pill-label">{{ item.label }}</span>
             </button>
           </div>
@@ -114,9 +124,11 @@
 
         <!-- My Posts Feed -->
         <div v-if="filteredMyPosts.length === 0" class="empty-my-posts">
-          <FileText :size="36" class="empty-icon" />
-          <h3 class="empty-title">You haven't posted anything yet</h3>
-          <p class="empty-sub">Report items you've lost or found to help the community.</p>
+          <div class="empty-icon-wrap">
+            <FileText :size="28" class="empty-icon" />
+          </div>
+          <h3 class="empty-title">No posts yet</h3>
+          <p class="empty-sub">Your Lost & Found posts will appear here.</p>
           <button
             type="button"
             class="create-first-post-btn"
@@ -133,7 +145,6 @@
             :post="post"
             :is-helpful="isHelpfulByMe(post.id)"
             @toggle-helpful="toggleHelpful"
-            @share="handleShare"
           />
         </div>
 
@@ -162,8 +173,9 @@ import {
 import PageHeader from "../components/PageHeader.vue";
 import {
   Pencil,
-  SunMoon,
-  ChevronRight,
+  Sun,
+  Moon,
+  Monitor,
   FileText,
   CircleHelp,
   SearchCheck,
@@ -184,6 +196,22 @@ const { currentProfile, signOutUser } = useAuth();
 const { posts, toggleHelpful, isHelpfulByMe, createPost } = usePosts();
 const { themePreference, setTheme } = useTheme();
 
+const cycleTheme = () => {
+  if (themePreference.value === "light") {
+    setTheme("dark");
+  } else if (themePreference.value === "dark") {
+    setTheme("system");
+  } else {
+    setTheme("light");
+  }
+};
+
+const themeAriaLabel = computed(() => {
+  if (themePreference.value === "light") return "Theme: Light";
+  if (themePreference.value === "dark") return "Theme: Dark";
+  return "Theme: System";
+});
+
 const handleSignOut = async () => {
   const actionSheet = await actionSheetController.create({
     header: "Sign Out",
@@ -202,44 +230,6 @@ const handleSignOut = async () => {
           });
           await toast.present();
           router.replace("/auth");
-        }
-      },
-      {
-        text: "Cancel",
-        role: "cancel"
-      }
-    ]
-  });
-  await actionSheet.present();
-};
-
-const currentThemeLabel = computed(() => {
-  if (themePreference.value === "system") return "System Default";
-  if (themePreference.value === "light") return "Light";
-  return "Dark";
-});
-
-const openThemeSelector = async () => {
-  const actionSheet = await actionSheetController.create({
-    header: "Appearance",
-    subHeader: "Choose how Lost & Found looks for you",
-    buttons: [
-      {
-        text: "System Default" + (themePreference.value === "system" ? " ✓" : ""),
-        handler: () => {
-          setTheme("system");
-        }
-      },
-      {
-        text: "Light" + (themePreference.value === "light" ? " ✓" : ""),
-        handler: () => {
-          setTheme("light");
-        }
-      },
-      {
-        text: "Dark" + (themePreference.value === "dark" ? " ✓" : ""),
-        handler: () => {
-          setTheme("dark");
         }
       },
       {
@@ -283,34 +273,6 @@ const filteredMyPosts = computed(() => {
   return myPosts.value;
 });
 
-const handleShare = async (post: Post) => {
-  const shareData = {
-    title: post.title,
-    text: `${post.title} — ${post.location}`,
-    url: window.location.origin + `/post/${post.id}`
-  };
-  if (navigator.share) {
-    try {
-      await navigator.share(shareData);
-      return;
-    } catch {
-      // ignore abort
-    }
-  }
-  try {
-    await navigator.clipboard.writeText(shareData.url);
-    const toast = await toastController.create({
-      message: "Post link copied to clipboard!",
-      duration: 2000,
-      position: "top",
-      color: "success"
-    });
-    await toast.present();
-  } catch {
-    // ignore
-  }
-};
-
 const handleCreate = async (data: PostFormData) => {
   try {
     await createPost(data);
@@ -339,52 +301,96 @@ const handleCreate = async (data: PostFormData) => {
   --background: var(--app-bg);
 }
 
-.ios-profile-header {
-  border-bottom: 0.5px solid var(--app-separator);
-}
-
-.ios-toolbar {
-  --background: var(--app-dock-bg);
-  --backdrop-filter: blur(20px);
-}
-
-.ios-header-title {
-  font-size: 17px;
-  font-weight: 600;
-  text-align: center;
-}
-
 .profile-container {
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 100px;
+  padding: 16px 16px calc(100px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   max-width: var(--max-content-width, 600px);
   margin: 0 auto;
 }
 
-/* Profile Hero Section (Flattened, no bulky card) */
-.profile-hero-section {
+/* 1. Modern Profile Hero Card */
+.profile-hero-card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-card-border);
+  border-radius: 24px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+/* 2. Cover Area with Blurred Avatar */
+.profile-cover {
+  position: relative;
+  height: 145px;
+  width: 100%;
+  overflow: hidden;
+  background: var(--app-surface-secondary);
+}
+
+.profile-cover-blur {
+  position: absolute;
+  inset: -24px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) saturate(1.4);
+  transform: scale(1.18);
+  opacity: 0.9;
+}
+
+.profile-cover-fallback {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 40%, #0f172a 100%);
+}
+
+.profile-cover-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.38) 100%);
+}
+
+/* 3. Hero Card Body */
+.profile-card-body {
+  padding: 0 18px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 12px;
-  padding: 20px 0 8px;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
 }
 
-.hero-info {
+.hero-avatar-wrap {
+  margin-top: -46px;
+  position: relative;
+  z-index: 2;
+  border-radius: 50%;
+  border: 3.5px solid var(--app-surface);
+  background: var(--app-surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero-identity {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
+  margin-top: -2px;
 }
 
 .hero-name {
   margin: 0;
-  font-size: 22px;
+  font-size: 23px;
   font-weight: 700;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.3px;
   color: var(--app-text-primary);
+  line-height: 1.25;
 }
 
 .hero-username {
@@ -393,7 +399,7 @@ const handleCreate = async (data: PostFormData) => {
   font-weight: 500;
 }
 
-/* Stats Row (Compact social stats, subtle dividers) */
+/* 5. Clean Inline Stats Row */
 .stats-row {
   display: flex;
   align-items: center;
@@ -402,7 +408,6 @@ const handleCreate = async (data: PostFormData) => {
   padding: 12px 0;
   border-top: 1px solid var(--app-card-border);
   border-bottom: 1px solid var(--app-card-border);
-  margin-top: 4px;
 }
 
 .stat-box {
@@ -413,25 +418,26 @@ const handleCreate = async (data: PostFormData) => {
 }
 
 .stat-number {
-  font-size: 17px;
+  font-size: 21px;
   font-weight: 700;
   color: var(--app-text-primary);
+  line-height: 1.2;
 }
 
 .text-danger {
-  color: var(--app-lost);
+  color: var(--app-lost, #ef4444);
 }
 
 .text-success {
-  color: var(--app-found);
+  color: var(--app-found, #10b981);
 }
 
 .text-resolved {
-  color: var(--app-resolved);
+  color: var(--app-resolved, #3b82f6);
 }
 
 .stat-label {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--app-text-secondary);
   margin-top: 2px;
@@ -439,141 +445,125 @@ const handleCreate = async (data: PostFormData) => {
 
 .stat-divider {
   width: 1px;
-  height: 20px;
+  height: 24px;
   background: var(--app-card-border);
+  opacity: 0.8;
 }
 
-/* Edit Profile Button */
-.edit-profile-btn {
+/* 6. Action Row: High-Contrast CTA Button, Theme Toggle, & Sign Out */
+.profile-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
-  background: var(--app-surface-secondary);
-  border: 1px solid var(--app-card-border);
-  color: var(--app-text-primary);
-  border-radius: 12px;
-  padding: 10px 16px;
-  height: 42px;
-  font-size: 14px;
+}
+
+.hero-cta-btn {
+  flex: 1;
+  min-width: 0;
+  height: 50px;
+  border-radius: 999px;
+  border: none;
+  background: var(--app-text-primary);
+  color: var(--app-bg);
+  font-size: 15px;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
-.edit-profile-btn:hover {
-  background: var(--app-primary-soft);
-  color: var(--app-primary);
-  border-color: rgba(47, 159, 232, 0.3);
+.hero-cta-btn:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
 }
 
-.edit-profile-btn:active {
+.hero-cta-btn:active {
   transform: scale(0.985);
+  opacity: 0.88;
 }
 
-.edit-profile-icon {
+.hero-theme-btn {
+  width: 50px;
+  height: 50px;
   flex-shrink: 0;
-}
-
-/* Profile Settings Row (Flattened, subtle border) */
-.profile-settings-section {
-  background: var(--app-surface);
-  border-radius: 14px;
+  border-radius: 999px;
   border: 1px solid var(--app-card-border);
-  overflow: hidden;
-}
-
-.settings-item-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 18px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: background 0.15s ease;
-  text-align: left;
-}
-
-.settings-item-btn:hover,
-.settings-item-btn:active {
   background: var(--app-surface-secondary);
-}
-
-.settings-item-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.settings-icon-bubble {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--app-primary-soft);
+  color: var(--app-text-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--app-primary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.15s ease;
+  padding: 0;
 }
 
-.settings-item-label {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--app-text-primary);
+.hero-theme-btn:hover {
+  background: var(--app-surface-tertiary);
+  transform: translateY(-1px);
 }
 
-.settings-item-right {
+.hero-theme-btn:active {
+  transform: scale(0.96);
+  opacity: 0.88;
+}
+
+.hero-signout-btn {
+  width: 50px;
+  height: 50px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--app-lost, #ef4444);
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.04);
+  transition: all 0.15s ease;
+  padding: 0;
 }
 
-.settings-item-value {
-  font-size: 14px;
-  color: var(--app-text-secondary);
+.hero-signout-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  transform: translateY(-1px);
 }
 
-.settings-chevron {
-  color: var(--app-text-tertiary);
+.hero-signout-btn:active {
+  transform: scale(0.96);
+  opacity: 0.88;
+}
+
+.cta-icon {
   flex-shrink: 0;
 }
 
-.settings-divider {
-  width: 100%;
-  height: 1px;
-  background: var(--app-card-border);
-}
-
-.signout-bubble {
-  background: rgba(239, 68, 68, 0.12);
-  color: var(--ion-color-danger, #ef4444);
-}
-
-.text-danger {
-  color: var(--ion-color-danger, #ef4444) !important;
-}
-
-/* My Posts Heading & Category Filter Pills */
+/* 11. My Posts Heading & Category Filter Tabs */
 .posts-heading-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 4px;
+  gap: 10px;
 }
 
 .heading-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px;
+  padding: 0 2px;
 }
 
 .section-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.2px;
   color: var(--app-text-primary);
@@ -584,38 +574,33 @@ const handleCreate = async (data: PostFormData) => {
   font-weight: 600;
   color: var(--app-primary);
   background: var(--app-primary-soft);
-  padding: 3px 9px;
-  border-radius: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
 }
 
 .category-pills-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.category-pills-row::-webkit-scrollbar {
-  display: none;
+  width: 100%;
 }
 
 .category-pill-btn {
   flex: 1;
   background: var(--app-surface);
   border: 1px solid var(--app-card-border);
-  border-radius: 14px;
-  padding: 10px 14px;
+  border-radius: 11px;
+  height: 38px;
+  padding: 0 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.15s ease;
   color: var(--app-text-secondary);
   font-size: 13px;
   font-weight: 500;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 
 .category-pill-btn:hover {
@@ -627,7 +612,6 @@ const handleCreate = async (data: PostFormData) => {
   color: var(--app-primary);
   border-color: rgba(47, 159, 232, 0.35);
   font-weight: 600;
-  box-shadow: 0 2px 10px rgba(47, 159, 232, 0.12);
 }
 
 .pill-icon {
@@ -635,11 +619,11 @@ const handleCreate = async (data: PostFormData) => {
   color: currentColor;
 }
 
-/* My Posts List */
+/* My Posts List & Empty State */
 .my-posts-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .empty-my-posts {
@@ -647,31 +631,42 @@ const handleCreate = async (data: PostFormData) => {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 40px 20px;
+  padding: 32px 20px;
   background: var(--app-surface);
-  border-radius: 20px;
+  border-radius: 16px;
   border: 1px solid var(--app-card-border);
-  gap: 8px;
+  gap: 6px;
+}
+
+.empty-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--app-surface-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-text-tertiary);
+  margin-bottom: 2px;
 }
 
 .empty-icon {
-  font-size: 36px;
   color: var(--app-text-tertiary);
-  margin-bottom: 4px;
 }
 
 .empty-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--app-text-primary);
 }
 
 .empty-sub {
   margin: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--app-text-secondary);
   max-width: 260px;
+  line-height: 1.4;
 }
 
 .create-first-post-btn {
@@ -679,12 +674,12 @@ const handleCreate = async (data: PostFormData) => {
   background: var(--app-primary);
   color: #ffffff;
   border: none;
-  border-radius: 14px;
-  padding: 11px 20px;
-  font-size: 14px;
+  border-radius: 12px;
+  padding: 9px 18px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(47, 159, 232, 0.25);
+  box-shadow: 0 2px 8px rgba(47, 159, 232, 0.25);
   transition: all 0.15s ease;
 }
 
@@ -696,35 +691,7 @@ const handleCreate = async (data: PostFormData) => {
   transform: scale(0.985);
 }
 
-/* Brand Footer */
-.profile-brand-footer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 24px 0 8px;
-  gap: 4px;
-  opacity: 0.75;
-}
-
-.profile-footer-logo {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  margin-bottom: 4px;
-}
-
-.profile-footer-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--app-text-primary);
-}
-
-.profile-footer-sub {
-  font-size: 11px;
-  color: var(--app-text-tertiary);
-}
-
 .dock-spacer {
-  height: 40px;
+  height: 20px;
 }
 </style>

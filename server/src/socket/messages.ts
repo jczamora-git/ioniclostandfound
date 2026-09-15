@@ -3,7 +3,8 @@ import {
   getConversation,
   getThread,
   saveMessage,
-  getThreadMessages
+  getThreadMessages,
+  getConversationMessages
 } from '../storage.js';
 import type { Message, SendMessagePayload } from '../types/chat.js';
 
@@ -20,7 +21,7 @@ export function registerMessageHandlers(io: Server, socket: Socket) {
       callback?: (res: { success: boolean; message?: Message; error?: string }) => void
     ) => {
       try {
-        const { conversationId, threadId: rawThreadId, text } = payload;
+        const { conversationId, threadId: rawThreadId, text, imageUrl, imageKey } = payload;
         if (!conversationId) {
           return callback?.({ success: false, error: 'conversationId is required' });
         }
@@ -28,7 +29,10 @@ export function registerMessageHandlers(io: Server, socket: Socket) {
         const threadId = rawThreadId || 'general';
 
         const trimmed = (text || '').trim();
-        if (!trimmed) {
+        const cleanImageUrl = imageUrl && typeof imageUrl === 'string' ? imageUrl.trim() : null;
+        const cleanImageKey = imageKey && typeof imageKey === 'string' ? imageKey.trim() : null;
+
+        if (!trimmed && !cleanImageUrl) {
           return callback?.({ success: false, error: 'Message cannot be empty' });
         }
 
@@ -60,6 +64,8 @@ export function registerMessageHandlers(io: Server, socket: Socket) {
           threadId,
           senderId: currentUid,
           text: trimmed,
+          ...(cleanImageUrl ? { imageUrl: cleanImageUrl } : {}),
+          ...(cleanImageKey ? { imageKey: cleanImageKey } : {}),
           createdAt: now,
           status: 'sent'
         };
@@ -112,17 +118,11 @@ export function registerMessageHandlers(io: Server, socket: Socket) {
           return callback?.({ success: false, error: 'conversationId is required' });
         }
 
-        const threadId = rawThreadId || 'general';
+        const messages =
+          !rawThreadId || rawThreadId === 'all'
+            ? await getConversationMessages(conversationId)
+            : await getThreadMessages(conversationId, rawThreadId);
 
-        const conv = await getConversation(conversationId);
-        if (!conv || !conv.participantIds.includes(currentUid)) {
-          return callback?.({
-            success: false,
-            error: 'Unauthorized or conversation not found'
-          });
-        }
-
-        const messages = await getThreadMessages(conversationId, threadId);
         callback?.({ success: true, messages });
       } catch (err: any) {
         console.error('[messages:list error]:', err);

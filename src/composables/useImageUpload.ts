@@ -13,6 +13,7 @@ export const ALLOWED_IMAGE_TYPES = [
 
 export const MAX_AVATAR_SIZE_BYTES = 4 * 1024 * 1024; // 4 MB
 export const MAX_POST_IMAGE_SIZE_BYTES = 8 * 1024 * 1024; // 8 MB
+export const MAX_MESSAGE_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export interface FileValidationResult {
   valid: boolean;
@@ -200,6 +201,61 @@ export function useImageUpload() {
   };
 
   /**
+   * Upload a message image to UploadThing
+   */
+  const uploadMessageImage = async (file: File): Promise<{ url: string; key: string }> => {
+    const validation = validateImageFile(file, MAX_MESSAGE_IMAGE_SIZE_BYTES);
+    if (!validation.valid) {
+      throw new Error(validation.error || 'Please select a valid image.');
+    }
+
+    isUploading.value = true;
+    uploadProgress.value = 0;
+    uploadError.value = null;
+
+    try {
+      const serverUrl = getChatServerUrl();
+      const headers = await getUploadHeaders();
+
+      const { uploadFiles } = genUploader<OurFileRouter>({
+        url: `${serverUrl}/api/uploadthing`,
+        package: 'ioniclostandfound'
+      });
+
+      const res = await uploadFiles('messageImageUploader', {
+        files: [file],
+        headers,
+        onUploadProgress: (p) => {
+          uploadProgress.value = p.progress;
+        }
+      });
+
+      if (!res || res.length === 0 || !res[0]) {
+        throw new Error('Upload returned no file response');
+      }
+
+      const uploaded = res[0];
+      const url = (uploaded as any).ufsUrl || uploaded.url;
+      const key = uploaded.key;
+
+      if (!url || !key) {
+        throw new Error('Missing file URL or key from UploadThing');
+      }
+
+      return { url, key };
+    } catch (err: any) {
+      if (import.meta.env.DEV) {
+        console.error('[UploadThing] Message image upload error:', err);
+      }
+      const friendlyMsg = 'Unable to upload image. Please try again.';
+      uploadError.value = friendlyMsg;
+      throw new Error(friendlyMsg);
+    } finally {
+      isUploading.value = false;
+    }
+  };
+
+  /**
    * Delete an uploaded file from UploadThing by key gracefully
    */
   const deleteUploadedFile = async (key: string | null | undefined): Promise<void> => {
@@ -232,6 +288,8 @@ export function useImageUpload() {
     validateImageFile,
     uploadAvatar,
     uploadPostImage,
+    uploadMessageImage,
     deleteUploadedFile
   };
 }
+

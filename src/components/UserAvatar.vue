@@ -23,7 +23,7 @@ const props = withDefaults(
     name?: string;
     username?: string;
     avatarUrl?: string | null;
-    size?: "sm" | "md" | "lg" | "xl";
+    size?: "xs" | "sm" | "md" | "lg" | "xl";
   }>(),
   {
     name: "User",
@@ -73,6 +73,12 @@ const initial = computed(() => {
   display: block;
 }
 
+.avatar-xs {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+
 .avatar-sm {
   width: 32px;
   height: 32px;
@@ -92,8 +98,8 @@ const initial = computed(() => {
 }
 
 .avatar-xl {
-  width: 80px;
-  height: 80px;
-  font-size: 30px;
+  width: 88px;
+  height: 88px;
+  font-size: 32px;
 }
 </style>

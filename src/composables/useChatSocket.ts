@@ -291,13 +291,15 @@ export function useChatSocket() {
   const sendMessage = async (
     conversationId: string,
     text: string,
-    threadId = 'general'
+    threadId = 'general',
+    imageUrl?: string | null,
+    imageKey?: string | null
   ): Promise<ChatMessage> => {
     const socket = await initSocket();
     return new Promise((resolve, reject) => {
       socket.emit(
         'message:send',
-        { conversationId, threadId, text },
+        { conversationId, threadId, text, imageUrl, imageKey },
         (res: { success: boolean; message?: ChatMessage; error?: string }) => {
           if (res && res.success && res.message) {
             resolve(res.message);

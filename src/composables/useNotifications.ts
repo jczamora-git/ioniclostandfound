@@ -265,6 +265,58 @@ export function useNotifications() {
   };
 
   /**
+   * Create and deliver a reply notification to the parent comment author.
+   */
+  const createReplyNotification = async (params: {
+    targetAuthorId: string;
+    postId: string;
+    postTitle?: string;
+    commentId: string;
+    replyText: string;
+  }) => {
+    const session = await getSessionUser();
+    const currentUid = session?.uid || currentProfile.value?.id;
+    if (!currentUid) return;
+
+    // Do not notify author about their own reply
+    if (params.targetAuthorId === currentUid) {
+      return;
+    }
+
+    const notifId = `notif_reply_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const notification: AppNotification = {
+      id: notifId,
+      type: 'reply',
+      actorId: currentUid,
+      actorName: currentProfile.value?.name || session?.name || 'Community Member',
+      actorUsername: currentProfile.value?.username || session?.username || 'user',
+      actorAvatarUrl: currentProfile.value?.avatarUrl || null,
+      postId: params.postId,
+      postTitle: params.postTitle,
+      commentId: params.commentId,
+      text: params.replyText.trim().slice(0, 100),
+      createdAt: Date.now(),
+      read: false
+    };
+
+    // 1. Try Firebase RTDB
+    try {
+      await set(dbRef(db, `notifications/${params.targetAuthorId}/${notifId}`), notification);
+    } catch (err) {}
+
+    // 2. Deliver via real-time Socket
+    try {
+      const socket = await initSocket();
+      socket.emit('notification:send', {
+        targetUserId: params.targetAuthorId,
+        notification
+      });
+    } catch (err) {
+      console.warn('[useNotifications] Failed to emit reply notification via socket:', err);
+    }
+  };
+
+  /**
    * Create and deliver a community merit notification to the helper.
    */
   const createMeritNotification = async (params: {
@@ -323,6 +375,7 @@ export function useNotifications() {
     markAsRead,
     markAllAsRead,
     createCommentNotification,
+    createReplyNotification,
     createMeritNotification
   };
 }

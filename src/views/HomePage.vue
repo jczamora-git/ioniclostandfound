@@ -1,40 +1,65 @@
 <template>
   <ion-page>
-    <ion-content :fullscreen="true" class="feed-content">
-      <!-- Native iOS Pull-To-Refresh -->
-      <ion-refresher slot="fixed" @ion-refresh="handleRefresh">
-        <ion-refresher-content pulling-icon="arrow-down" refreshing-spinner="crescent" />
-      </ion-refresher>
-
-      <div class="ios-screen-container modern-container">
-        <!-- Minimal Social Header with Expandable Search and Filter Sheet -->
-        <header class="home-top-bar">
-          <div v-if="!isSearchActive" class="brand-bar-row">
-            <h1 class="home-brand-title">Lost &amp; Found</h1>
-            <div class="header-actions-wrap">
-              <button
-                type="button"
-                class="header-icon-btn bell-btn"
-                aria-label="Notifications"
-                @click="showNotificationsModal = true"
-              >
-                <Bell :size="21" />
-                <span
-                  v-if="unreadCount > 0"
-                  class="bell-unread-badge"
-                  aria-label="Unread notifications count"
+    <!-- Fixed Home Header with Notifications, Search, and Filter -->
+    <ion-header class="ion-no-border home-ion-header">
+      <ion-toolbar class="home-ion-toolbar">
+        <div class="header-inner-box">
+          <header class="home-top-bar">
+            <div v-if="!isSearchActive" class="brand-bar-row">
+              <h1 class="home-brand-title">Lost &amp; Found</h1>
+              <div class="header-actions-wrap">
+                <button
+                  type="button"
+                  class="header-icon-btn bell-btn"
+                  aria-label="Notifications"
+                  @click="showNotificationsModal = true"
                 >
-                  {{ unreadBadgeFormatted }}
-                </span>
-              </button>
-              <button
-                type="button"
-                class="header-icon-btn"
+                  <Bell :size="21" />
+                  <span
+                    v-if="unreadCount > 0"
+                    class="bell-unread-badge"
+                    aria-label="Unread notifications count"
+                  >
+                    {{ unreadBadgeFormatted }}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  class="header-icon-btn"
+                  aria-label="Search lost and found posts"
+                  @click="openSearch"
+                >
+                  <Search :size="21" />
+                </button>
+                <button
+                  type="button"
+                  class="header-icon-btn filter-btn"
+                  :class="{ active: hasActiveFilters }"
+                  :aria-label="filterButtonLabel"
+                  aria-haspopup="dialog"
+                  :aria-expanded="showFilterSheet"
+                  @click="showFilterSheet = true"
+                >
+                  <SlidersHorizontal :size="20" />
+                  <span v-if="hasActiveFilters" class="filter-active-count" aria-hidden="true">
+                    {{ activeFilterCount }}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Expanded Search Row -->
+            <div v-else class="expanded-search-bar">
+              <Search :size="18" class="search-leading-icon" aria-hidden="true" />
+              <input
+                ref="searchInputRef"
+                v-model="searchQuery"
+                type="search"
+                class="search-input"
+                placeholder="Search lost &amp; found posts..."
                 aria-label="Search lost and found posts"
-                @click="openSearch"
-              >
-                <Search :size="21" />
-              </button>
+                autocomplete="off"
+              />
               <button
                 type="button"
                 class="header-icon-btn filter-btn"
@@ -49,46 +74,27 @@
                   {{ activeFilterCount }}
                 </span>
               </button>
+              <button
+                type="button"
+                class="close-search-btn"
+                aria-label="Close search"
+                @click="closeSearch"
+              >
+                <X :size="18" />
+              </button>
             </div>
-          </div>
+          </header>
+        </div>
+      </ion-toolbar>
+    </ion-header>
 
-          <!-- Expanded Search Row -->
-          <div v-else class="expanded-search-bar">
-            <Search :size="18" class="search-leading-icon" aria-hidden="true" />
-            <input
-              ref="searchInputRef"
-              v-model="searchQuery"
-              type="search"
-              class="search-input"
-              placeholder="Search lost &amp; found posts..."
-              aria-label="Search lost and found posts"
-              autocomplete="off"
-            />
-            <button
-              type="button"
-              class="header-icon-btn filter-btn"
-              :class="{ active: hasActiveFilters }"
-              :aria-label="filterButtonLabel"
-              aria-haspopup="dialog"
-              :aria-expanded="showFilterSheet"
-              @click="showFilterSheet = true"
-            >
-              <SlidersHorizontal :size="20" />
-              <span v-if="hasActiveFilters" class="filter-active-count" aria-hidden="true">
-                {{ activeFilterCount }}
-              </span>
-            </button>
-            <button
-              type="button"
-              class="close-search-btn"
-              aria-label="Close search"
-              @click="closeSearch"
-            >
-              <X :size="18" />
-            </button>
-          </div>
-        </header>
+    <ion-content :fullscreen="true" class="feed-content">
+      <!-- Native iOS Pull-To-Refresh -->
+      <ion-refresher slot="fixed" @ion-refresh="handleRefresh">
+        <ion-refresher-content pulling-icon="arrow-down" refreshing-spinner="crescent" />
+      </ion-refresher>
 
+      <div class="ios-screen-container modern-container">
         <!-- Active Filter Removable Chips (Only shown when advanced filters are active) -->
         <div v-if="activeChips.length > 0" class="active-filter-chips-row">
           <button
@@ -211,7 +217,6 @@
             :post="post"
             :is-helpful="isHelpfulByMe(post.id)"
             @toggle-helpful="handleToggleHelpful"
-            @share="handleSharePost"
           />
         </div>
 
@@ -248,9 +253,11 @@
 import { computed, nextTick, onMounted, ref, watchEffect, type Component } from "vue";
 import {
   IonContent,
+  IonHeader,
   IonPage,
   IonRefresher,
   IonRefresherContent,
+  IonToolbar,
   toastController
 } from "@ionic/vue";
 import {
@@ -423,45 +430,6 @@ const handleToggleHelpful = async (postId: string) => {
   await toggleHelpful(postId);
 };
 
-const handleSharePost = async (post: Post) => {
-  const shareData = {
-    title: `${post.type.toUpperCase()}: ${post.title}`,
-    text: `${post.title} — ${post.location}. Found/Lost on ${post.eventDate}. Check Lost & Found forum.`,
-    url: window.location.origin + `/post/${post.id}`
-  };
-
-  if (navigator.share) {
-    try {
-      await navigator.share(shareData);
-      return;
-    } catch (e: any) {
-      if (e.name === "AbortError") return;
-    }
-  }
-
-  // Fallback: copy to clipboard
-  try {
-    await navigator.clipboard.writeText(
-      `${shareData.title}\n${shareData.text}\n${shareData.url}`
-    );
-    const toast = await toastController.create({
-      message: "Post link copied to clipboard!",
-      duration: 2000,
-      position: "top",
-      color: "success"
-    });
-    await toast.present();
-  } catch {
-    const toast = await toastController.create({
-      message: "Could not share at this time.",
-      duration: 2000,
-      position: "top",
-      color: "warning"
-    });
-    await toast.present();
-  }
-};
-
 const openCreateComposer = () => {
   showComposer.value = true;
 };
@@ -498,8 +466,33 @@ const handleDirectCreate = async (data: PostFormData) => {
   --background: var(--app-bg);
 }
 
+.home-ion-header {
+  background: var(--app-bg);
+  border-bottom: 1px solid var(--app-card-border);
+  z-index: 100;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.home-ion-toolbar {
+  --background: var(--app-bg);
+  --border-width: 0;
+  --padding-top: 0;
+  --padding-bottom: 0;
+  --padding-start: 0;
+  --padding-end: 0;
+  --min-height: 56px;
+}
+
+.header-inner-box {
+  width: 100%;
+  max-width: var(--max-content-width, 600px);
+  margin: 0 auto;
+  padding: 0 16px;
+  box-sizing: border-box;
+}
+
 .modern-container {
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 100px;
+  padding: 12px 16px calc(100px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -513,8 +506,8 @@ const handleDirectCreate = async (data: PostFormData) => {
   min-height: 56px;
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--app-card-border);
-  padding-bottom: 8px;
+  background: transparent;
+  box-sizing: border-box;
 }
 
 .brand-bar-row {

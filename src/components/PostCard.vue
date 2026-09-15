@@ -71,17 +71,17 @@
     </div>
 
     <!-- Footer Actions: Helpful, Comment, Share -->
-    <footer class="card-actions">
+    <footer class="card-actions" role="group" aria-label="Post actions">
       <!-- Helpful Button -->
       <button
         type="button"
         class="action-btn"
         :class="{ active: isHelpful }"
-        aria-label="Mark helpful"
+        :aria-label="isHelpful ? 'Marked as helpful' : 'Helpful'"
+        title="Helpful"
         @click.stop="$emit('toggle-helpful', post.id)"
       >
         <Heart :size="18" :fill="isHelpful ? 'currentColor' : 'none'" class="action-icon" />
-        <span>Helpful</span>
         <span v-if="(post.helpfulCount || 0) > 0" class="action-count">
           {{ post.helpfulCount }}
         </span>
@@ -91,11 +91,11 @@
       <button
         type="button"
         class="action-btn"
-        aria-label="View comments"
+        aria-label="Comments"
+        title="Comments"
         @click.stop="handleCommentClick"
       >
         <MessageCircle :size="18" class="action-icon" />
-        <span>Comment</span>
         <span v-if="(post.commentsCount || 0) > 0" class="action-count">
           {{ post.commentsCount }}
         </span>
@@ -105,13 +105,20 @@
       <button
         type="button"
         class="action-btn"
-        aria-label="Share post"
-        @click.stop="$emit('share', post)"
+        aria-label="Share"
+        title="Share"
+        @click.stop="handleShareClick"
       >
-        <Share2 :size="17" class="action-icon" />
-        <span>Share</span>
+        <Share2 :size="18" class="action-icon" />
       </button>
     </footer>
+
+    <!-- Centered Share Modal -->
+    <ShareModal
+      :is-open="showShareModal"
+      :post="post"
+      @close="showShareModal = false"
+    />
 
     <!-- Latest Comment Preview (Single most recent comment, max 2 lines) -->
     <div
@@ -145,6 +152,7 @@ import {
 } from "lucide-vue-next";
 import UserAvatar from "./UserAvatar.vue";
 import StatusBadge from "./StatusBadge.vue";
+import ShareModal from "./ShareModal.vue";
 import { hasValidDescription, type Post } from "../types/post";
 import { useLatestComment } from "../composables/useLatestComment";
 import { useProfiles } from "../composables/useProfiles";
@@ -154,13 +162,20 @@ const props = defineProps<{
   isHelpful?: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (e: "toggle-helpful", id: string): void;
-  (e: "share", post: Post): void;
 }>();
 
 const router = useRouter();
 const imageFailed = ref(false);
+const showShareModal = ref(false);
+
+const handleShareClick = (e?: MouseEvent) => {
+  if (e) {
+    e.stopPropagation();
+  }
+  showShareModal.value = true;
+};
 
 const { getProfile, loadProfile } = useProfiles();
 
@@ -434,9 +449,9 @@ const handleCommentClick = () => {
 .card-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: space-around;
   border-top: 1px solid var(--app-card-border);
-  padding-top: 8px;
+  padding: 4px 0 0;
   margin-top: 2px;
 }
 
@@ -445,19 +460,24 @@ const handleCommentClick = () => {
   border: none;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--app-text-secondary);
   cursor: pointer;
-  padding: 6px 8px;
+  padding: 6px 10px;
   border-radius: 8px;
-  min-height: 38px;
+  height: 44px;
+  min-height: 44px;
+  flex: 1;
+  min-width: 0;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .action-btn:hover {
   background: var(--app-surface-secondary);
+  color: var(--app-text-primary);
 }
 
 .action-icon {

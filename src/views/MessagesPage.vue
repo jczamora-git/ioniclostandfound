@@ -1,14 +1,14 @@
 <template>
   <ion-page>
+    <!-- Fixed Page Header -->
+    <PageHeader title="Messages" />
+
     <ion-content :fullscreen="true" class="messages-content">
       <ion-refresher slot="fixed" @ion-refresh="handleRefresh">
         <ion-refresher-content pulling-icon="arrow-down" refreshing-spinner="crescent" />
       </ion-refresher>
 
       <div class="ios-screen-container messages-container">
-        <!-- Unified Page Header -->
-        <PageHeader title="Messages" />
-
         <!-- Unauthenticated Prompt (Only when no session and no dev account) -->
         <div v-if="!hasValidSession" class="messages-empty-state">
           <div class="empty-icon-bubble">
@@ -147,7 +147,7 @@ const handleSelectConversation = (convId: string) => {
 }
 
 .messages-container {
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 100px;
+  padding: 16px 16px calc(100px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 16px;

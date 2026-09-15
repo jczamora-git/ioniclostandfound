@@ -16,6 +16,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    watch: {
+      ignored: ['**/android/**', '**/server/**', '**/dist/**']
+    }
+  },
   test: {
     globals: true,
     environment: 'jsdom'

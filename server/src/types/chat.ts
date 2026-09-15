@@ -44,7 +44,9 @@ export interface Message {
   conversationId: string;
   threadId: string;
   senderId: string;
-  text: string;
+  text?: string;
+  imageUrl?: string | null;
+  imageKey?: string | null;
   createdAt: number;
   status?: 'sent' | 'delivered' | 'read';
 }
@@ -77,7 +79,9 @@ export interface CreateConversationPayload {
 export interface SendMessagePayload {
   conversationId: string;
   threadId: string;
-  text: string;
+  text?: string;
+  imageUrl?: string | null;
+  imageKey?: string | null;
 }
 
 export interface AppNotification {

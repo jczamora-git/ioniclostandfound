@@ -7,4 +7,7 @@ export interface PostComment {
   content: string;
   createdAt: number;
   updatedAt: number;
+  parentCommentId?: string | null;
+  rootCommentId?: string | null;
 }
+

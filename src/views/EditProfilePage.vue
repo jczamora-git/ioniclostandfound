@@ -1,10 +1,10 @@
 <template>
   <ion-page>
+    <!-- Fixed Header with Back Navigation -->
+    <PageHeader title="Edit Profile" :show-back="true" default-back-url="/tabs/profile" />
+
     <ion-content :fullscreen="true" class="edit-content">
       <div class="ios-screen-container edit-container">
-        <!-- Unified Header with Back Navigation -->
-        <PageHeader title="Edit Profile" :show-back="true" default-back-url="/tabs/profile" />
-
         <!-- Avatar Preview and Actions -->
         <div class="avatar-preview-section">
           <UserAvatar
@@ -355,7 +355,7 @@ const handleSave = async () => {
 }
 
 .edit-container {
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 40px;
+  padding: 16px 16px 40px;
   display: flex;
   flex-direction: column;
   gap: 16px;

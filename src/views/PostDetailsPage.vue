@@ -1,5 +1,27 @@
 <template>
   <ion-page>
+    <!-- Minimal Top Navigation in Fixed IonHeader: Back on left, More options on right -->
+    <ion-header class="ion-no-border details-ion-header">
+      <ion-toolbar class="details-ion-toolbar">
+        <div class="header-inner-box">
+          <nav class="post-detail-top-nav">
+            <button type="button" class="back-nav-btn" aria-label="Go back" @click="router.back()">
+              <ArrowLeft :size="22" />
+            </button>
+            <button
+              v-if="post"
+              type="button"
+              class="header-more-btn"
+              aria-label="Post options"
+              @click="handleMoreOptions"
+            >
+              <MoreHorizontal :size="20" />
+            </button>
+          </nav>
+        </div>
+      </ion-toolbar>
+    </ion-header>
+
     <ion-content :fullscreen="true" class="details-content">
       <div v-if="loading" class="details-loading">
         <ion-spinner name="crescent" />
@@ -16,21 +38,6 @@
       </div>
 
       <div v-else class="ios-screen-container details-container">
-        <!-- Minimal Top Navigation: Back on left, More options on right -->
-        <nav class="post-detail-top-nav">
-          <button type="button" class="back-nav-btn" aria-label="Go back" @click="router.back()">
-            <ArrowLeft :size="22" />
-          </button>
-          <button
-            type="button"
-            class="header-more-btn"
-            aria-label="Post options"
-            @click="handleMoreOptions"
-          >
-            <MoreHorizontal :size="20" />
-          </button>
-        </nav>
-
         <!-- Author Info Directly (No outer card) -->
         <div class="thread-author-row">
           <div class="author-left" @click="goToAuthorProfile">
@@ -133,28 +140,32 @@
           </div>
         </div>
 
-        <!-- Social Action Row (Social-media style: Heart, Comment, Message Poster, Share) -->
-        <div class="thread-actions-row">
+        <!-- Social Action Row (Icon-first minimal: Heart, Comment, Message Poster, Share) -->
+        <div class="thread-actions-row" role="group" aria-label="Post actions">
+          <!-- Helpful Action -->
           <button
             type="button"
             class="thread-action-btn"
             :class="{ active: isHelpfulByMe(post.id) }"
+            :aria-label="isHelpfulByMe(post.id) ? 'Marked as helpful' : 'Helpful'"
+            title="Helpful"
             @click="handleToggleHelpful"
           >
-            <Heart :size="18" :fill="isHelpfulByMe(post.id) ? 'currentColor' : 'none'" />
-            <span>Helpful</span>
+            <Heart :size="20" :fill="isHelpfulByMe(post.id) ? 'currentColor' : 'none'" class="action-btn-icon" />
             <span v-if="(post.helpfulCount || 0) > 0" class="action-count-tag">
               {{ post.helpfulCount }}
             </span>
           </button>
 
+          <!-- Comment Action -->
           <button
             type="button"
             class="thread-action-btn"
+            aria-label="Comments"
+            title="Comments"
             @click="scrollToComments"
           >
-            <MessageCircle :size="18" />
-            <span>Comment</span>
+            <MessageCircle :size="20" class="action-btn-icon" />
             <span v-if="comments.length > 0" class="action-count-tag">
               {{ comments.length }}
             </span>
@@ -166,16 +177,23 @@
             type="button"
             class="thread-action-btn message-poster-btn"
             :disabled="creatingChat"
+            aria-label="Message poster"
+            title="Message poster"
             @click="handleMessagePoster"
           >
             <ion-spinner v-if="creatingChat" name="crescent" class="chat-spinner" />
-            <SendHorizontal v-else :size="17" />
-            <span>Message Poster</span>
+            <SendHorizontal v-else :size="19" class="action-btn-icon" />
           </button>
 
-          <button type="button" class="thread-action-btn" @click="handleShare">
-            <Share2 :size="18" />
-            <span>Share</span>
+          <!-- Share Action -->
+          <button
+            type="button"
+            class="thread-action-btn"
+            aria-label="Share"
+            title="Share"
+            @click.stop="handleShare"
+          >
+            <Share2 :size="19" class="action-btn-icon" />
           </button>
         </div>
 
@@ -189,6 +207,7 @@
             :current-user-id="currentProfile?.id"
             :loading="commentsLoading"
             @delete-comment="handleDeleteComment"
+            @reply-to-comment="handleReplyToComment"
           />
         </section>
       </div>
@@ -196,9 +215,20 @@
       <!-- Docked Comment Composer for Bottom of Page -->
       <CommentComposer
         v-if="post"
+        ref="commentComposerRef"
+        :reply-target="activeReplyTarget"
         @submit-comment="handleSubmitComment"
+        @cancel-reply="activeReplyTarget = null"
       />
     </ion-content>
+
+    <!-- Centered Share Modal -->
+    <ShareModal
+      v-if="post"
+      :is-open="showShareModal"
+      :post="post"
+      @close="showShareModal = false"
+    />
 
     <!-- Post Owner Action Sheet -->
     <ion-action-sheet
@@ -238,14 +268,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watchEffect } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   IonAlert,
   IonActionSheet,
   IonContent,
+  IonHeader,
   IonPage,
   IonSpinner,
+  IonToolbar,
   toastController
 } from "@ionic/vue";
 import {
@@ -266,8 +298,9 @@ import {
 import UserAvatar from "../components/UserAvatar.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import CommentList from "../components/CommentList.vue";
-import CommentComposer from "../components/CommentComposer.vue";
+import CommentComposer, { type ReplyTarget } from "../components/CommentComposer.vue";
 import ResolvePostModal from "../components/ResolvePostModal.vue";
+import ShareModal from "../components/ShareModal.vue";
 import { auth } from "../firebase";
 import { useAuth, getSessionUser, sessionUid } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
@@ -276,6 +309,11 @@ import { useProfiles } from "../composables/useProfiles";
 import { useAchievements } from "../composables/useAchievements";
 import { createOrGetConversation } from "../composables/useConversations";
 import { hasValidDescription, type Post } from "../types/post";
+
+const activeReplyTarget = ref<ReplyTarget | null>(null);
+const commentComposerRef = ref<InstanceType<typeof CommentComposer> | null>(null);
+
+const showShareModal = ref(false);
 
 const route = useRoute();
 const router = useRouter();
@@ -476,37 +514,11 @@ const handleToggleHelpful = async () => {
   await toggleHelpful(post.value.id);
 };
 
-const handleShare = async () => {
-  if (!post.value) return;
-  const shareData = {
-    title: `${post.value.type.toUpperCase()}: ${post.value.title}`,
-    text: `${post.value.title} — ${post.value.location}. Check Lost & Found forum.`,
-    url: window.location.href
-  };
-
-  if (navigator.share) {
-    try {
-      await navigator.share(shareData);
-      return;
-    } catch (e: any) {
-      if (e.name === "AbortError") return;
-    }
+const handleShare = (e?: MouseEvent) => {
+  if (e) {
+    e.stopPropagation();
   }
-
-  try {
-    await navigator.clipboard.writeText(
-      `${shareData.title}\n${shareData.text}\n${shareData.url}`
-    );
-    const toast = await toastController.create({
-      message: "Post link copied to clipboard!",
-      duration: 2000,
-      position: "top",
-      color: "success"
-    });
-    await toast.present();
-  } catch {
-    // fallback
-  }
+  showShareModal.value = true;
 };
 
 const scrollToComments = () => {
@@ -514,12 +526,34 @@ const scrollToComments = () => {
   if (el) {
     el.scrollIntoView({ behavior: 'smooth' });
   }
+  nextTick(() => {
+    commentComposerRef.value?.focusInput();
+  });
+};
+
+const handleReplyToComment = (target: ReplyTarget) => {
+  activeReplyTarget.value = target;
+  nextTick(() => {
+    commentComposerRef.value?.focusInput();
+  });
 };
 
 const handleSubmitComment = async (content: string) => {
   if (!post.value) return;
   try {
-    await addComment(post.value.id, content);
+    const target = activeReplyTarget.value;
+    await addComment(
+      post.value.id,
+      content,
+      target
+        ? {
+            parentCommentId: target.commentId,
+            rootCommentId: target.rootCommentId,
+            parentAuthorId: target.authorId
+          }
+        : undefined
+    );
+    activeReplyTarget.value = null;
   } catch (err: any) {
     const toast = await toastController.create({
       message: err.message || "Failed to submit comment.",
@@ -694,6 +728,29 @@ const deleteAlertButtons = [
   --background: var(--app-bg);
 }
 
+.details-ion-header {
+  --background: var(--app-bg);
+  background: var(--app-bg);
+  border-bottom: 1px solid var(--app-card-border);
+  z-index: 100;
+}
+
+.details-ion-toolbar {
+  --background: var(--app-bg);
+  --border-color: transparent;
+  --min-height: 52px;
+  --padding-top: 0px;
+  --padding-bottom: 0px;
+  --padding-start: 16px;
+  --padding-end: 16px;
+}
+
+.header-inner-box {
+  max-width: var(--max-content-width, 600px);
+  margin: 0 auto;
+  width: 100%;
+}
+
 .details-loading,
 .details-not-found {
   display: flex;
@@ -722,7 +779,7 @@ const deleteAlertButtons = [
 }
 
 .details-container {
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 36px;
+  padding: 16px 16px 36px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -941,12 +998,12 @@ const deleteAlertButtons = [
   color: var(--app-found, #22b573);
 }
 
-/* Social Actions Row (Social media style: no border/card/background, even distribution) */
+/* Social Actions Row (Icon-only, evenly spaced, minimal mobile layout) */
 .thread-actions-row {
   display: flex;
   align-items: center;
   justify-content: space-around;
-  padding: 4px 0;
+  padding: 2px 0;
   width: 100%;
 }
 
@@ -955,17 +1012,24 @@ const deleteAlertButtons = [
   align-items: center;
   justify-content: center;
   gap: 6px;
+  height: 44px;
   min-height: 44px;
-  padding: 8px 8px;
+  padding: 0 4px;
   background: transparent;
   border: none;
-  border-radius: 0;
+  border-radius: 10px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--app-text-secondary);
   cursor: pointer;
   flex: 1;
-  transition: opacity 0.15s ease, color 0.15s ease;
+  min-width: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.thread-action-btn:hover {
+  background-color: var(--app-surface-secondary);
+  color: var(--app-text-primary);
 }
 
 .thread-action-btn:active {
@@ -976,14 +1040,20 @@ const deleteAlertButtons = [
   color: #e53935;
 }
 
+.action-btn-icon {
+  flex-shrink: 0;
+}
+
 .action-count-tag {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
+  color: currentColor;
+  line-height: 1;
 }
 
 .chat-spinner {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   --color: var(--app-text-secondary);
 }
 

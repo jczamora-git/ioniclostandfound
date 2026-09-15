@@ -1,117 +1,139 @@
 <template>
   <ion-page>
+    <!-- Fixed Header with Back Navigation -->
+    <PageHeader
+      title="Member Profile"
+      :show-back="true"
+      default-back-url="/tabs/home"
+    />
+
     <ion-content :fullscreen="true" class="public-content">
       <div class="ios-screen-container public-container">
-        <!-- Unified Header with Back Navigation matching Edit Profile -->
-        <PageHeader
-          title="Member Profile"
-          :show-back="true"
-          default-back-url="/tabs/home"
-        />
-
         <div v-if="loading" class="public-loading">
           <ion-spinner name="crescent" />
           <span>Loading member profile...</span>
         </div>
 
         <template v-else>
-          <!-- Profile Identity Card -->
-          <header class="public-hero-card">
-          <UserAvatar
-            :name="profile?.name || authorNameFallback"
-            :username="profile?.username || authorUsernameFallback"
-            :avatar-url="profile?.avatarUrl"
-            size="xl"
+          <!-- Modern Profile Hero Card -->
+          <div class="public-hero-card">
+            <!-- Cover Area with Blurred Avatar Background -->
+            <div class="profile-cover">
+              <div
+                v-if="profile?.avatarUrl"
+                class="profile-cover-blur"
+                :style="{ backgroundImage: `url(${profile.avatarUrl})` }"
+              ></div>
+              <div v-else class="profile-cover-fallback"></div>
+              <div class="profile-cover-overlay"></div>
+            </div>
+
+            <!-- Hero Card Body (Avatar overlaps cover) -->
+            <div class="profile-card-body">
+              <div class="hero-avatar-wrap">
+                <UserAvatar
+                  :name="profile?.name || authorNameFallback"
+                  :username="profile?.username || authorUsernameFallback"
+                  :avatar-url="profile?.avatarUrl"
+                  size="xl"
+                />
+              </div>
+
+              <div class="hero-identity">
+                <h1 class="hero-name">{{ profile?.name || authorNameFallback }}</h1>
+                <span class="hero-username">@{{ profile?.username || authorUsernameFallback }}</span>
+              </div>
+
+              <!-- Clean Inline Stats Row -->
+              <div class="stats-row">
+                <div class="stat-box">
+                  <span class="stat-number">{{ userPosts.length }}</span>
+                  <span class="stat-label">Posts</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-box">
+                  <span class="stat-number text-danger">{{ lostCount }}</span>
+                  <span class="stat-label">Lost</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-box">
+                  <span class="stat-number text-success">{{ foundCount }}</span>
+                  <span class="stat-label">Found</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-box">
+                  <span class="stat-number text-resolved">{{ resolvedCount }}</span>
+                  <span class="stat-label">Resolved</span>
+                </div>
+              </div>
+
+              <!-- Large High-Contrast Full-Width Pill CTA Button -->
+              <button
+                v-if="!isOwnProfile"
+                type="button"
+                class="hero-cta-btn"
+                :disabled="creatingChat"
+                @click="handleMessageUser"
+              >
+                <ion-spinner v-if="creatingChat" name="crescent" class="chat-spinner" />
+                <template v-else>
+                  <MessageCircle :size="16" class="cta-icon" />
+                  <span>Message User</span>
+                </template>
+              </button>
+            </div>
+          </div>
+
+          <!-- Achievements Section -->
+          <AchievementsSection
+            v-if="uid"
+            :user-id="uid"
+            :is-own-profile="isOwnProfile"
           />
-          <div class="hero-info">
-            <h1 class="hero-name">{{ profile?.name || authorNameFallback }}</h1>
-            <span class="hero-username">@{{ profile?.username || authorUsernameFallback }}</span>
+
+          <!-- Member Posts Section Header & Filter Pills -->
+          <section class="posts-heading-section">
+            <div class="heading-row">
+              <h2 class="section-title">Member Posts</h2>
+              <span class="posts-count-tag">{{ filteredUserPosts.length }}</span>
+            </div>
+
+            <div class="category-pills-row" role="tablist">
+              <button
+                v-for="item in tabFilters"
+                :key="item.value"
+                type="button"
+                role="tab"
+                class="category-pill-btn"
+                :class="{ active: activeTab === item.value }"
+                @click="activeTab = item.value"
+              >
+                <component :is="item.icon" :size="14" class="pill-icon" />
+                <span class="pill-label">{{ item.label }}</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- Member Posts Feed -->
+          <div v-if="filteredUserPosts.length === 0" class="empty-user-posts">
+            <div class="empty-icon-wrap">
+              <FileText :size="28" class="empty-icon" />
+            </div>
+            <h3 class="empty-title">No posts in this category</h3>
+            <p class="empty-sub">This community member currently has no active listings here.</p>
           </div>
 
-          <!-- Stats Grid -->
-          <div class="stats-row">
-            <div class="stat-box">
-              <span class="stat-number">{{ userPosts.length }}</span>
-              <span class="stat-label">Posts</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-box">
-              <span class="stat-number text-danger">{{ lostCount }}</span>
-              <span class="stat-label">Lost</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-box">
-              <span class="stat-number text-success">{{ foundCount }}</span>
-              <span class="stat-label">Found</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-box">
-              <span class="stat-number text-resolved">{{ resolvedCount }}</span>
-              <span class="stat-label">Resolved</span>
-            </div>
+          <div v-else class="user-posts-list">
+            <PostCard
+              v-for="post in filteredUserPosts"
+              :key="post.id"
+              :post="post"
+              :is-helpful="isHelpfulByMe(post.id)"
+              @toggle-helpful="toggleHelpful"
+            />
           </div>
 
-          <!-- Message User Action (Only when viewing another user's profile) -->
-          <button
-            v-if="!isOwnProfile"
-            type="button"
-            class="message-user-btn"
-            :disabled="creatingChat"
-            @click="handleMessageUser"
-          >
-            <ion-spinner v-if="creatingChat" name="crescent" class="chat-spinner" />
-            <MessageCircle v-else :size="16" class="message-user-icon" />
-            <span>Message User</span>
-          </button>
-        </header>
-
-        <!-- Achievements Section -->
-        <AchievementsSection
-          v-if="uid"
-          :user-id="uid"
-          :is-own-profile="isOwnProfile"
-        />
-
-        <!-- Member Posts Section Header & Filter Pills -->
-        <section class="posts-heading-section">
-          <div class="heading-row">
-            <h2 class="section-title">Member Posts</h2>
-            <span class="posts-count-tag">{{ filteredUserPosts.length }}</span>
-          </div>
-
-          <div class="category-pills-row" role="tablist">
-            <button
-              v-for="item in tabFilters"
-              :key="item.value"
-              type="button"
-              role="tab"
-              class="category-pill-btn"
-              :class="{ active: activeTab === item.value }"
-              @click="activeTab = item.value"
-            >
-              <component :is="item.icon" :size="15" class="pill-icon" />
-              <span class="pill-label">{{ item.label }}</span>
-            </button>
-          </div>
-        </section>
-
-        <!-- Member Posts Feed -->
-        <div v-if="filteredUserPosts.length === 0" class="empty-user-posts">
-          <FileText :size="36" class="empty-icon" />
-          <h3 class="empty-title">No posts in this category</h3>
-          <p class="empty-sub">This community member currently has no active listings here.</p>
-        </div>
-
-        <div v-else class="user-posts-list">
-          <PostCard
-            v-for="post in filteredUserPosts"
-            :key="post.id"
-            :post="post"
-            :is-helpful="isHelpfulByMe(post.id)"
-            @toggle-helpful="toggleHelpful"
-            @share="handleShare"
-          />
-        </div>
+          <div class="dock-spacer"></div>
         </template>
       </div>
     </ion-content>
@@ -206,34 +228,6 @@ onMounted(async () => {
   loading.value = false;
 });
 
-const handleShare = async (post: Post) => {
-  const shareData = {
-    title: post.title,
-    text: `${post.title} — ${post.location}`,
-    url: window.location.origin + `/post/${post.id}`
-  };
-  if (navigator.share) {
-    try {
-      await navigator.share(shareData);
-      return;
-    } catch {
-      // ignore
-    }
-  }
-  try {
-    await navigator.clipboard.writeText(shareData.url);
-    const toast = await toastController.create({
-      message: "Post link copied to clipboard!",
-      duration: 2000,
-      position: "top",
-      color: "success"
-    });
-    await toast.present();
-  } catch {
-    // ignore
-  }
-};
-
 const handleMessageUser = async () => {
   if (creatingChat.value) return;
   creatingChat.value = true;
@@ -319,40 +313,96 @@ const handleMessageUser = async () => {
 }
 
 .public-container {
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 40px;
+  padding: 16px 16px calc(100px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   max-width: var(--max-content-width, 600px);
   margin: 0 auto;
   width: 100%;
 }
 
+/* 1. Modern Profile Hero Card */
 .public-hero-card {
   background: var(--app-surface);
-  border-radius: 24px;
-  padding: 24px 20px;
-  box-shadow: var(--app-card-shadow);
   border: 1px solid var(--app-card-border);
+  border-radius: 24px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+/* 2. Cover Area with Blurred Avatar */
+.profile-cover {
+  position: relative;
+  height: 145px;
+  width: 100%;
+  overflow: hidden;
+  background: var(--app-surface-secondary);
+}
+
+.profile-cover-blur {
+  position: absolute;
+  inset: -24px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) saturate(1.4);
+  transform: scale(1.18);
+  opacity: 0.9;
+}
+
+.profile-cover-fallback {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 40%, #0f172a 100%);
+}
+
+.profile-cover-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.38) 100%);
+}
+
+/* 3. Hero Card Body */
+.profile-card-body {
+  padding: 0 18px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 12px;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
 }
 
-.hero-info {
+.hero-avatar-wrap {
+  margin-top: -46px;
+  position: relative;
+  z-index: 2;
+  border-radius: 50%;
+  border: 3.5px solid var(--app-surface);
+  background: var(--app-surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero-identity {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
+  margin-top: -2px;
 }
 
 .hero-name {
   margin: 0;
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.4px;
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
   color: var(--app-text-primary);
+  line-height: 1.25;
 }
 
 .hero-username {
@@ -361,57 +411,15 @@ const handleMessageUser = async () => {
   font-weight: 500;
 }
 
+/* Clean Inline Stats Row */
 .stats-row {
   display: flex;
   align-items: center;
   justify-content: space-around;
   width: 100%;
-  padding: 12px 6px;
-  background: var(--app-surface-secondary);
-  border-radius: 16px;
-  border: 1px solid var(--app-card-border);
-  margin-top: 4px;
-}
-
-.message-user-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  height: 40px;
-  border-radius: 10px;
-  background-color: var(--app-primary);
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  margin-top: 6px;
-  transition: opacity 0.15s ease, background-color 0.15s ease;
-}
-
-.message-user-btn:hover {
-  background-color: var(--app-primary-deep, #0e4a9e);
-}
-
-.message-user-btn:active {
-  opacity: 0.85;
-}
-
-.message-user-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.message-user-icon {
-  flex-shrink: 0;
-}
-
-.chat-spinner {
-  width: 16px;
-  height: 16px;
-  --color: #ffffff;
+  padding: 12px 0;
+  border-top: 1px solid var(--app-card-border);
+  border-bottom: 1px solid var(--app-card-border);
 }
 
 .stat-box {
@@ -422,25 +430,26 @@ const handleMessageUser = async () => {
 }
 
 .stat-number {
-  font-size: 18px;
+  font-size: 21px;
   font-weight: 700;
   color: var(--app-text-primary);
+  line-height: 1.2;
 }
 
 .text-danger {
-  color: var(--app-lost);
+  color: var(--app-lost, #ef4444);
 }
 
 .text-success {
-  color: var(--app-found);
+  color: var(--app-found, #10b981);
 }
 
 .text-resolved {
-  color: var(--app-resolved);
+  color: var(--app-resolved, #3b82f6);
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--app-text-secondary);
   margin-top: 2px;
@@ -450,26 +459,71 @@ const handleMessageUser = async () => {
   width: 1px;
   height: 24px;
   background: var(--app-card-border);
+  opacity: 0.8;
 }
 
-/* Member Posts Heading & Category Filter Pills */
+/* Strong High-Contrast Full-Width Pill CTA Button */
+.hero-cta-btn {
+  width: 100%;
+  height: 50px;
+  border-radius: 999px;
+  border: none;
+  background: var(--app-text-primary);
+  color: var(--app-bg);
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  transition: all 0.15s ease;
+}
+
+.hero-cta-btn:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.hero-cta-btn:active {
+  transform: scale(0.985);
+  opacity: 0.88;
+}
+
+.hero-cta-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.cta-icon {
+  flex-shrink: 0;
+}
+
+.chat-spinner {
+  width: 18px;
+  height: 18px;
+  --color: currentColor;
+}
+
+/* Member Posts Heading & Category Filter Tabs */
 .posts-heading-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 4px;
+  gap: 10px;
 }
 
 .heading-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px;
+  padding: 0 2px;
 }
 
 .section-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.2px;
   color: var(--app-text-primary);
@@ -480,38 +534,33 @@ const handleMessageUser = async () => {
   font-weight: 600;
   color: var(--app-primary);
   background: var(--app-primary-soft);
-  padding: 3px 9px;
-  border-radius: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
 }
 
 .category-pills-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.category-pills-row::-webkit-scrollbar {
-  display: none;
+  width: 100%;
 }
 
 .category-pill-btn {
   flex: 1;
   background: var(--app-surface);
   border: 1px solid var(--app-card-border);
-  border-radius: 14px;
-  padding: 10px 14px;
+  border-radius: 11px;
+  height: 38px;
+  padding: 0 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.15s ease;
   color: var(--app-text-secondary);
   font-size: 13px;
   font-weight: 500;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 
 .category-pill-btn:hover {
@@ -523,7 +572,6 @@ const handleMessageUser = async () => {
   color: var(--app-primary);
   border-color: rgba(47, 159, 232, 0.35);
   font-weight: 600;
-  box-shadow: 0 2px 10px rgba(47, 159, 232, 0.12);
 }
 
 .pill-icon {
@@ -531,15 +579,11 @@ const handleMessageUser = async () => {
   color: currentColor;
 }
 
-.segment-tab.active .segment-tab-label {
-  color: var(--app-text-primary);
-  font-weight: 600;
-}
-
+/* User Posts List & Empty State */
 .user-posts-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .empty-user-posts {
@@ -547,29 +591,45 @@ const handleMessageUser = async () => {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 40px 20px;
+  padding: 32px 20px;
   background: var(--app-surface);
-  border-radius: 20px;
+  border-radius: 16px;
   border: 1px solid var(--app-card-border);
-  gap: 8px;
+  gap: 6px;
+}
+
+.empty-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--app-surface-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-text-tertiary);
+  margin-bottom: 2px;
 }
 
 .empty-icon {
-  font-size: 36px;
   color: var(--app-text-tertiary);
 }
 
 .empty-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--app-text-primary);
 }
 
 .empty-sub {
   margin: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--app-text-secondary);
   max-width: 260px;
+  line-height: 1.4;
+}
+
+.dock-spacer {
+  height: 20px;
 }
 </style>

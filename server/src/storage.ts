@@ -431,7 +431,9 @@ export async function saveMessage(msg: Message): Promise<void> {
     store.threads[conversationId][threadId] = thread;
   }
 
-  thread.lastMessage = msg.text;
+  const summary = (msg.text || '').trim() || (msg.imageUrl ? 'Sent a photo' : '');
+
+  thread.lastMessage = summary;
   thread.lastMessageAt = msg.createdAt;
   thread.lastMessageSenderId = msg.senderId;
   thread.updatedAt = msg.createdAt;
@@ -441,7 +443,7 @@ export async function saveMessage(msg: Message): Promise<void> {
 
   const conv = store.conversations[conversationId];
   if (conv) {
-    conv.lastMessage = msg.text;
+    conv.lastMessage = summary;
     conv.lastMessageAt = msg.createdAt;
     conv.lastMessageSenderId = msg.senderId;
     conv.lastMessageThreadId = threadId;

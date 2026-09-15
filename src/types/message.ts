@@ -3,7 +3,10 @@ export interface ChatMessage {
   conversationId: string;
   threadId?: string;
   senderId: string;
-  text: string;
+  text?: string;
+  imageUrl?: string | null;
+  imageKey?: string | null;
   createdAt: number;
   status?: 'sent' | 'delivered' | 'read';
 }
+
