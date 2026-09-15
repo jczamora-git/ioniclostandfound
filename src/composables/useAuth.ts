@@ -19,6 +19,79 @@ import { auth, db } from "../firebase";
 import { disconnectSocket } from "../services/socket";
 import type { Profile, ProfileFormData } from "../types/profile";
 
+export interface DevSession {
+  uid: string;
+  name: string;
+  username: string;
+  phone: string;
+  email: string;
+  isDevAccount: true;
+}
+
+const DEV_AUTH_STORAGE_KEY = "dev_auth_session";
+
+/**
+ * Checks whether development authentication bypass is enabled.
+ * Strictly limited to dev mode (import.meta.env.DEV) and explicitly enabled via VITE_DEV_BYPASS_AUTH.
+ * Never enabled in production builds.
+ */
+export const isDevBypassEnabled = (): boolean => {
+  return import.meta.env.DEV === true && import.meta.env.VITE_DEV_BYPASS_AUTH === "true";
+};
+
+export const getDevSession = (): DevSession | null => {
+  if (!isDevBypassEnabled()) return null;
+  try {
+    const raw = localStorage.getItem(DEV_AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.uid && parsed.isDevAccount) {
+      return parsed as DevSession;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+export const saveDevSession = (session: DevSession): void => {
+  if (!isDevBypassEnabled()) return;
+  try {
+    localStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(session));
+  } catch (e) {
+    console.warn("[DEV] Failed to save dev session to localStorage:", e);
+  }
+};
+
+export const clearDevSession = (): void => {
+  try {
+    localStorage.removeItem(DEV_AUTH_STORAGE_KEY);
+  } catch {}
+};
+
+export const createDevUser = (session: DevSession): User => {
+  return {
+    uid: session.uid,
+    email: session.email,
+    isAnonymous: false,
+    displayName: session.name,
+    emailVerified: false,
+    metadata: {},
+    providerData: [],
+    refreshToken: "",
+    tenantId: null,
+    delete: async () => {},
+    getIdToken: async () => "",
+    getIdTokenResult: async () => ({} as any),
+    reload: async () => {},
+    toJSON: () => session,
+    phoneNumber: session.phone,
+    photoURL: null,
+    providerId: "password",
+    isDevAccount: true
+  } as unknown as User;
+};
+
 const currentUser = ref<User | null>(null);
 const currentProfile = ref<Profile | null>(null);
 const isAuthReady = ref(false);
@@ -57,6 +130,8 @@ export function formatAuthError(err: any): string {
       return "This account has been disabled. Please contact support.";
     case "auth/operation-not-allowed":
       return "Email/Password sign-in is not enabled in Firebase Console.";
+    case "auth/configuration-not-found":
+      return "Email/Password sign-in provider is not configured in Firebase Console. Please enable it under Authentication > Sign-in method.";
     case "auth/network-request-failed":
       return "Network connection issue. Please check your internet connection.";
     case "auth/requires-recent-login":
@@ -85,7 +160,8 @@ export function initializeAuthSession(): Promise<User | null> {
     onAuthStateChanged(auth, async (user) => {
       authLoading.value = true;
       if (user) {
-        // Reuse existing Firebase user session (anonymous or email/password)
+        // Real user session exists -> clear any local dev bypass session
+        clearDevSession();
         currentUser.value = user;
         try {
           const profile = await fetchProfile(user.uid);
@@ -106,7 +182,36 @@ export function initializeAuthSession(): Promise<User | null> {
           resolve(user);
         }
       } else {
-        // No authenticated session
+        // No authenticated Firebase user session.
+        // Check if a dev test session exists in development mode
+        if (isDevBypassEnabled()) {
+          const devSession = getDevSession();
+          if (devSession) {
+            console.warn("[DEV] Firebase Auth bypass enabled. This is not a real authenticated account.");
+            const devUser = createDevUser(devSession);
+            currentUser.value = devUser;
+            currentProfile.value = {
+              id: devSession.uid,
+              name: devSession.name,
+              username: devSession.username,
+              phone: devSession.phone,
+              email: devSession.email,
+              avatarUrl: null,
+              avatarPath: null,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            };
+            isAuthReady.value = true;
+            authLoading.value = false;
+
+            if (!initialResolved) {
+              initialResolved = true;
+              resolve(devUser);
+            }
+            return;
+          }
+        }
+
         currentUser.value = null;
         currentProfile.value = null;
         isAuthReady.value = true;
@@ -174,7 +279,7 @@ export const checkUsernameAvailable = async (
     if (!snap.exists()) return true;
     return snap.val() === (currentUid || auth.currentUser?.uid || currentUser.value?.uid);
   } catch (err) {
-    console.error("Error checking username availability:", err);
+    console.warn("Could not check username availability:", err);
     return true;
   }
 };
@@ -184,13 +289,36 @@ export function useAuth() {
    * Sign in with existing email and password.
    */
   const signIn = async (email: string, password: string): Promise<User> => {
+    const cleanEmail = email.trim();
     try {
-      const userCred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      clearDevSession();
       currentUser.value = userCred.user;
       const profile = await fetchProfile(userCred.user.uid);
       currentProfile.value = profile;
       return userCred.user;
     } catch (err: any) {
+      const errCode = err?.code || "";
+      if (errCode === "auth/configuration-not-found" && isDevBypassEnabled()) {
+        const devSession = getDevSession();
+        if (devSession && devSession.email.toLowerCase() === cleanEmail.toLowerCase()) {
+          console.warn("[DEV] Firebase Auth bypass enabled. Restoring development test session (not a real authenticated account).");
+          const devUser = createDevUser(devSession);
+          currentUser.value = devUser;
+          currentProfile.value = {
+            id: devSession.uid,
+            name: devSession.name,
+            username: devSession.username,
+            phone: devSession.phone,
+            email: devSession.email,
+            avatarUrl: null,
+            avatarPath: null,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          };
+          return devUser;
+        }
+      }
       console.error("[Auth] Sign in failed:", err);
       throw new Error(formatAuthError(err));
     }
@@ -199,6 +327,7 @@ export function useAuth() {
   /**
    * Create a new account or upgrade an existing anonymous user via linkWithCredential.
    * Preserves the exact same UID so existing posts, comments, conversations, and ownership persist!
+   * In dev bypass mode, if Firebase returns auth/configuration-not-found, creates a temporary local dev account.
    */
   const signUp = async (params: {
     name: string;
@@ -226,15 +355,37 @@ export function useAuth() {
         const credential = EmailAuthProvider.credential(cleanEmail, params.password);
         const userCred = await linkWithCredential(auth.currentUser, credential);
         user = userCred.user;
+        clearDevSession();
         console.log("[Auth] Successfully linked anonymous account to email/password with UID:", user.uid);
       } else {
         // Fresh sign up
         const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, params.password);
         user = userCred.user;
+        clearDevSession();
       }
     } catch (err: any) {
-      console.error("[Auth] Sign up / linking failed:", err);
-      throw new Error(formatAuthError(err));
+      const errCode = err?.code || "";
+      if (errCode === "auth/configuration-not-found" && isDevBypassEnabled()) {
+        console.warn("[DEV] Firebase Auth bypass enabled. This is not a real authenticated account.");
+        const devUid = (auth.currentUser?.isAnonymous && auth.currentUser?.uid)
+          ? auth.currentUser.uid
+          : `dev_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+        const devSession: DevSession = {
+          uid: devUid,
+          name: cleanName,
+          username: cleanUsername,
+          phone: cleanPhone,
+          email: cleanEmail,
+          isDevAccount: true
+        };
+
+        saveDevSession(devSession);
+        user = createDevUser(devSession);
+      } else {
+        console.error("[Auth] Sign up / linking failed:", err);
+        throw new Error(formatAuthError(err));
+      }
     }
 
     currentUser.value = user;
@@ -259,6 +410,7 @@ export function useAuth() {
     } catch (err) {
       console.warn("[Auth] Firebase signOut warning:", err);
     } finally {
+      clearDevSession();
       currentUser.value = null;
       currentProfile.value = null;
       authInitPromise = null;
@@ -306,8 +458,28 @@ export function useAuth() {
     };
 
     // Save profile and claim username
-    await set(dbRef(db, `profiles/${uid}`), newProfile);
-    await set(dbRef(db, `usernames/${cleanUsername}`), uid);
+    try {
+      await set(dbRef(db, `profiles/${uid}`), newProfile);
+      await set(dbRef(db, `usernames/${cleanUsername}`), uid);
+    } catch (dbErr) {
+      if ((user as any)?.isDevAccount) {
+        console.warn("[DEV] Realtime Database write skipped or permission denied for mock dev user:", dbErr);
+      } else {
+        throw dbErr;
+      }
+    }
+
+    // Update local dev session if active
+    if ((user as any)?.isDevAccount) {
+      const devSession = getDevSession();
+      if (devSession) {
+        devSession.name = newProfile.name;
+        devSession.username = newProfile.username;
+        devSession.phone = newProfile.phone;
+        devSession.email = newProfile.email || devSession.email;
+        saveDevSession(devSession);
+      }
+    }
 
     currentProfile.value = newProfile;
     return newProfile;
@@ -335,6 +507,7 @@ export function useAuth() {
     authLoading,
     isAuthenticated: computed(() => !!currentUser.value && !currentUser.value.isAnonymous),
     isAnonymous: computed(() => !!currentUser.value?.isAnonymous),
+    isDevAccount: computed(() => !!(currentUser.value as any)?.isDevAccount),
     hasProfile: computed(() => !!currentProfile.value?.username),
     initAuth: initializeAuthSession,
     initializeAuthSession,
