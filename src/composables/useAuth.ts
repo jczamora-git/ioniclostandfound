@@ -32,13 +32,15 @@ export interface DevSession {
 
 const DEV_AUTH_STORAGE_KEY = "dev_auth_session";
 
+export const isDevBypassAuth =
+  import.meta.env.VITE_DEV_BYPASS_AUTH === "true";
+
 /**
  * Checks whether development authentication bypass is enabled.
- * Strictly limited to dev mode (import.meta.env.DEV) and explicitly enabled via VITE_DEV_BYPASS_AUTH.
- * Never enabled in production builds.
+ * Driven by VITE_DEV_BYPASS_AUTH === 'true'.
  */
 export const isDevBypassEnabled = (): boolean => {
-  return import.meta.env.DEV === true && import.meta.env.VITE_DEV_BYPASS_AUTH === "true";
+  return isDevBypassAuth;
 };
 
 export const getDevSession = (): DevSession | null => {
@@ -56,7 +58,7 @@ export const getDevSession = (): DevSession | null => {
 };
 
 export const saveDevSession = (session: DevSession): void => {
-  if (!isDevBypassEnabled()) return;
+  if (!isDevBypassAuth) return;
   try {
     localStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(session));
   } catch (e) {
@@ -153,6 +155,30 @@ export function formatAuthError(err: any): string {
  * Checks for existing Firebase Auth session.
  */
 export function initializeAuthSession(): Promise<User | null> {
+  // If in bypass mode and we already have a dev session in localStorage, immediately populate state
+  if (isDevBypassAuth) {
+    const devSession = getDevSession();
+    if (devSession) {
+      const devUser = createDevUser(devSession);
+      currentUser.value = devUser;
+      currentProfile.value = {
+        id: devSession.uid,
+        name: devSession.name,
+        username: devSession.username,
+        phone: devSession.phone,
+        email: devSession.email,
+        avatarUrl: devSession.avatarUrl || null,
+        avatarKey: devSession.avatarKey || null,
+        avatarPath: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      isAuthReady.value = true;
+      authLoading.value = false;
+      return Promise.resolve(devUser);
+    }
+  }
+
   if (authInitPromise) {
     return authInitPromise;
   }
@@ -162,74 +188,71 @@ export function initializeAuthSession(): Promise<User | null> {
 
     onAuthStateChanged(auth, async (user) => {
       authLoading.value = true;
-      if (user) {
-        // Real Firebase Auth session exists -> clear any local dev bypass session
-        clearDevSession();
-        currentUser.value = user;
-        try {
-          const profile = await fetchProfile(user.uid);
-          currentProfile.value = profile;
-        } catch (err) {
-          console.warn("[Auth] Error fetching profile for user:", err);
-        }
-        isAuthReady.value = true;
-        authLoading.value = false;
+      try {
+        if (user) {
+          // Real Firebase Auth session exists -> clear any local dev bypass session
+          clearDevSession();
+          currentUser.value = user;
+          try {
+            const profile = await fetchProfile(user.uid);
+            currentProfile.value = profile;
+          } catch (err) {
+            console.warn("[Auth] Error fetching profile for user:", err);
+          }
+          isAuthReady.value = true;
 
-        console.log("[Auth] initialized", {
-          authenticated: !!user,
-          uid: user?.uid
-        });
+          if (!initialResolved) {
+            initialResolved = true;
+            resolve(user);
+          }
+        } else {
+          // No authenticated Firebase user session.
+          // Check if dev test bypass is explicitly enabled
+          if (isDevBypassAuth) {
+            const devSession = getDevSession();
+            if (devSession) {
+              console.warn("[DEV] Firebase Auth bypass enabled. This is a development mock session.");
+              const devUser = createDevUser(devSession);
+              currentUser.value = devUser;
+              currentProfile.value = {
+                id: devSession.uid,
+                name: devSession.name,
+                username: devSession.username,
+                phone: devSession.phone,
+                email: devSession.email,
+                avatarUrl: devSession.avatarUrl || null,
+                avatarKey: devSession.avatarKey || null,
+                avatarPath: null,
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+              };
+              isAuthReady.value = true;
 
-        if (!initialResolved) {
-          initialResolved = true;
-          resolve(user);
-        }
-      } else {
-        // No authenticated Firebase user session.
-        // Check if dev test bypass is explicitly enabled
-        if (isDevBypassEnabled()) {
-          const devSession = getDevSession();
-          if (devSession) {
-            console.warn("[DEV] Firebase Auth bypass enabled. This is a development mock session.");
-            const devUser = createDevUser(devSession);
-            currentUser.value = devUser;
-            currentProfile.value = {
-              id: devSession.uid,
-              name: devSession.name,
-              username: devSession.username,
-              phone: devSession.phone,
-              email: devSession.email,
-              avatarUrl: devSession.avatarUrl || null,
-              avatarKey: devSession.avatarKey || null,
-              avatarPath: null,
-              createdAt: Date.now(),
-              updatedAt: Date.now()
-            };
-            isAuthReady.value = true;
-            authLoading.value = false;
-
-            if (!initialResolved) {
-              initialResolved = true;
-              resolve(devUser);
+              if (!initialResolved) {
+                initialResolved = true;
+                resolve(devUser);
+              }
+              return;
             }
-            return;
+          }
+
+          currentUser.value = null;
+          currentProfile.value = null;
+          isAuthReady.value = true;
+
+          if (!initialResolved) {
+            initialResolved = true;
+            resolve(null);
           }
         }
-
-        currentUser.value = null;
-        currentProfile.value = null;
-        isAuthReady.value = true;
-        authLoading.value = false;
-
-        console.log("[Auth] initialized", {
-          authenticated: false,
-          uid: undefined
-        });
-
+      } catch (e) {
+        console.warn("[Auth] Initialization error:", e);
         if (!initialResolved) {
           initialResolved = true;
-          resolve(null);
+          resolve(currentUser.value);
         }
+      } finally {
+        authLoading.value = false;
       }
     });
   });
@@ -296,6 +319,11 @@ export async function resolveUsername(rawUsername: string): Promise<string> {
   const clean = normalizeUsername(rawUsername);
   if (!clean) {
     throw new Error("Please enter a valid username.");
+  }
+
+  // When bypass is enabled, do not make network calls to /api/auth/resolve-username
+  if (isDevBypassAuth) {
+    return `${clean}@example.com`;
   }
 
   const serverUrl = getApiServerUrl();
