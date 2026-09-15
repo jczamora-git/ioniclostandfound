@@ -183,8 +183,18 @@
 
           <!-- VIEW 3: CREATE ACCOUNT (Step 2 of Create Account) -->
           <template v-else-if="view === 'create-account'">
-            <!-- Step Navigation Header -->
-            <div class="auth-step-header">
+            <!-- Consistent Branding Header -->
+            <header class="auth-brand auth-brand-compact">
+              <img
+                src="/lost-and-found.png"
+                alt="Lost &amp; Found Logo"
+                class="auth-logo"
+              />
+              <h1 class="auth-title">Lost &amp; Found</h1>
+            </header>
+
+            <!-- Step Title Row with inline Back Button -->
+            <div class="auth-step-row">
               <button
                 type="button"
                 class="auth-back-btn"
@@ -193,7 +203,7 @@
               >
                 <ArrowLeft :size="20" />
               </button>
-              <div class="auth-step-title-wrap">
+              <div class="auth-step-text">
                 <h2 class="auth-step-title">Create your account</h2>
                 <p class="auth-step-subtitle">Set your email and password</p>
               </div>
@@ -615,14 +625,18 @@ const handleCreateAccount = async () => {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
+}
+
+.auth-brand-compact {
+  margin-bottom: 18px;
 }
 
 .auth-logo {
-  width: 70px;
-  height: 70px;
+  width: 68px;
+  height: 68px;
   object-fit: contain;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   filter: drop-shadow(0 4px 12px rgba(47, 159, 232, 0.2));
 }
 
@@ -647,22 +661,22 @@ const handleCreateAccount = async () => {
   color: var(--app-text-secondary, #72777D);
 }
 
-/* Step 2 Header with Back Button */
-.auth-step-header {
+/* Step 2 Row with inline Back Button */
+.auth-step-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 
 .auth-back-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0;
   background: var(--app-input-background, #F2F4F7);
   border: 1px solid var(--app-border, rgba(20, 25, 30, 0.08));
@@ -678,14 +692,14 @@ const handleCreateAccount = async () => {
   background: var(--app-border, rgba(20, 25, 30, 0.12));
 }
 
-.auth-step-title-wrap {
+.auth-step-text {
   display: flex;
   flex-direction: column;
 }
 
 .auth-step-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--app-text-primary, #202124);
