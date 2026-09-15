@@ -3,7 +3,12 @@ import { genUploader } from 'uploadthing/client';
 import { auth } from '../firebase';
 import { getAuthenticatedUser, isDevBypassEnabled, getDevSession } from './useAuth';
 import { getChatServerUrl } from '../services/socket';
-import type { OurFileRouter } from '../../server/src/uploadthing';
+
+export type OurFileRouter = {
+  avatarUploader: any;
+  postImageUploader: any;
+  messageImageUploader: any;
+};
 
 export const ALLOWED_IMAGE_TYPES = [
   'image/jpeg',
