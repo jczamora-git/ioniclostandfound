@@ -392,23 +392,30 @@ export async function resolveUsername(rawUsername: string): Promise<string> {
 }
 
 export interface SessionUser {
+  id: string;
   uid: string;
   name: string;
   username: string;
   phone?: string;
   email?: string;
+  avatarUrl?: string | null;
+  avatarKey?: string | null;
   isAnonymous: boolean;
   isDevAccount: boolean;
 }
 
 export const sessionUser = computed<SessionUser | null>(() => {
   if (currentUser.value) {
+    const canonicalId = currentProfile.value?.id || currentUser.value.uid;
     return {
-      uid: currentUser.value.uid,
+      id: canonicalId,
+      uid: canonicalId,
       name: currentProfile.value?.name || currentUser.value.displayName || "Member",
       username: currentProfile.value?.username || "user",
       phone: currentProfile.value?.phone || currentUser.value.phoneNumber || undefined,
       email: currentUser.value.email || currentProfile.value?.email || undefined,
+      avatarUrl: currentProfile.value?.avatarUrl || null,
+      avatarKey: currentProfile.value?.avatarKey || null,
       isAnonymous: currentUser.value.isAnonymous || false,
       isDevAccount: !!(currentUser.value as any)?.isDevAccount
     };
@@ -416,7 +423,11 @@ export const sessionUser = computed<SessionUser | null>(() => {
   return null;
 });
 
-export const sessionUid = computed<string | null>(() => sessionUser.value?.uid || null);
+export const currentAppUserId = computed<string | null>(() => {
+  return currentProfile.value?.id || sessionUser.value?.id || sessionUser.value?.uid || currentUser.value?.uid || null;
+});
+
+export const sessionUid = computed<string | null>(() => currentAppUserId.value);
 export const isRealFirebaseUser = computed<boolean>(() => !!auth.currentUser && !auth.currentUser.isAnonymous);
 export const isDevBypassUser = computed<boolean>(() => isDevBypassEnabled() && !!(currentUser.value as any)?.isDevAccount);
 export const hasValidSession = computed<boolean>(() => !!sessionUser.value && (!sessionUser.value.isAnonymous || sessionUser.value.isDevAccount));
@@ -720,6 +731,7 @@ export function useAuth() {
     currentProfile,
     sessionUser,
     sessionUid,
+    currentAppUserId,
     currentSessionUser: sessionUser,
     isSessionReady: isAuthReady,
     isRealFirebaseUser,

@@ -301,11 +301,10 @@ import CommentList from "../components/CommentList.vue";
 import CommentComposer, { type ReplyTarget } from "../components/CommentComposer.vue";
 import ResolvePostModal from "../components/ResolvePostModal.vue";
 import ShareModal from "../components/ShareModal.vue";
-import { auth } from "../firebase";
-import { useAuth, getSessionUser, sessionUid } from "../composables/useAuth";
+import { useAuth, getSessionUser, currentAppUserId } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useComments } from "../composables/useComments";
-import { useProfiles } from "../composables/useProfiles";
+import { useProfiles, getProfileById, loadProfile } from "../composables/useProfiles";
 import { useAchievements } from "../composables/useAchievements";
 import { createOrGetConversation } from "../composables/useConversations";
 import { hasValidDescription, type Post } from "../types/post";
@@ -320,7 +319,6 @@ const router = useRouter();
 const { currentProfile } = useAuth();
 const { getPostById, deletePost, resolvePost, toggleHelpful, isHelpfulByMe } = usePosts();
 const { comments, commentsLoading, subscribeToComments, stopCommentsSubscription, addComment, deleteComment } = useComments();
-const { getProfile, loadProfile } = useProfiles();
 const { awardMeritAndResolvePost } = useAchievements();
 
 const postId = computed(() => route.params.id as string);
@@ -340,7 +338,7 @@ watchEffect(() => {
   }
 });
 
-const authorProfile = computed(() => getProfile(post.value?.authorId));
+const authorProfile = computed(() => getProfileById(post.value?.authorId));
 
 const authorName = computed(() => {
   return authorProfile.value?.name || post.value?.authorName || "Community Member";
@@ -356,7 +354,7 @@ const authorAvatarUrl = computed(() => {
 
 const creditedHelper = computed(() => {
   if (!post.value?.meritRecipientId) return null;
-  const p = getProfile(post.value.meritRecipientId);
+  const p = getProfileById(post.value.meritRecipientId);
   return {
     id: post.value.meritRecipientId,
     name: p?.name || "Community Member",
@@ -378,9 +376,9 @@ const showGeneralActionSheet = ref(false);
 const showDeleteAlert = ref(false);
 
 const isOwner = computed(() => {
-  const currentUid = sessionUid.value || auth.currentUser?.uid || currentProfile.value?.id;
-  if (!post.value || !currentUid) return false;
-  return post.value.authorId === currentUid;
+  const currentId = currentAppUserId.value || currentProfile.value?.id;
+  if (!post.value || !currentId) return false;
+  return post.value.authorId === currentId;
 });
 
 const handleMoreOptions = () => {

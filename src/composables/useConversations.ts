@@ -139,13 +139,17 @@ export function useConversations() {
   } = useChatSocket();
 
   /**
-   * Helper to resolve participant profile from cache, conversation details, or RTDB.
+   * Helper to resolve participant profile from cache, RTDB, or fallback.
    */
   const resolveOtherProfile = async (
     otherUid: string,
     conv: Conversation
   ): Promise<Profile> => {
-    // 1. Check embedded participantDetails first
+    // 1. Check profile via shared cached loader first (canonical profile source)
+    const loaded = await loadProfile(otherUid);
+    if (loaded) return loaded;
+
+    // 2. Check embedded participantDetails if profile record not found directly
     if (conv.participantDetails && conv.participantDetails[otherUid]) {
       const details = conv.participantDetails[otherUid];
       return {
@@ -158,10 +162,6 @@ export function useConversations() {
         updatedAt: 0
       };
     }
-
-    // 2. Check profile via shared cached loader
-    const loaded = await loadProfile(otherUid);
-    if (loaded) return loaded;
 
     return {
       id: otherUid,

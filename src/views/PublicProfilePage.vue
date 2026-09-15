@@ -161,7 +161,8 @@ import PostCard from "../components/PostCard.vue";
 import PageHeader from "../components/PageHeader.vue";
 import AchievementsSection from "../components/AchievementsSection.vue";
 import { auth } from "../firebase";
-import { useAuth, getSessionUser, sessionUid } from "../composables/useAuth";
+import { useAuth, getSessionUser, currentAppUserId } from "../composables/useAuth";
+import { useProfiles, loadProfile } from "../composables/useProfiles";
 import { usePosts } from "../composables/usePosts";
 import { createOrGetConversation } from "../composables/useConversations";
 import type { Post } from "../types/post";
@@ -169,19 +170,19 @@ import type { Profile } from "../types/profile";
 
 const route = useRoute();
 const router = useRouter();
-const { getPublicProfile, currentProfile } = useAuth();
+const { currentProfile } = useAuth();
 const { posts, toggleHelpful, isHelpfulByMe } = usePosts();
 
-const uid = computed(() => route.params.uid as string);
-const profile = ref<Omit<Profile, "phone"> | null>(null);
+const uid = computed(() => (route.params.uid || (route.params as any).userId) as string);
+const profile = ref<Profile | null>(null);
 const loading = ref(true);
 const creatingChat = ref(false);
 const activeTab = ref<"Posts" | "Lost" | "Found">("Posts");
 
 const isOwnProfile = computed(() => {
-  const currentUid = sessionUid.value || auth.currentUser?.uid || currentProfile.value?.id;
-  if (!currentUid || !uid.value) return false;
-  return currentUid === uid.value;
+  const currentId = currentAppUserId.value || currentProfile.value?.id;
+  if (!currentId || !uid.value) return false;
+  return currentId === uid.value;
 });
 
 interface ProfileTabItem {
@@ -224,7 +225,9 @@ const filteredUserPosts = computed(() => {
 
 onMounted(async () => {
   loading.value = true;
-  profile.value = await getPublicProfile(uid.value);
+  if (uid.value) {
+    profile.value = await loadProfile(uid.value);
+  }
   loading.value = false;
 });
 

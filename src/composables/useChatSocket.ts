@@ -2,7 +2,7 @@ import { ref } from 'vue';
 import { ref as dbRef, get, update } from 'firebase/database';
 import { db } from '../firebase';
 import { getApiServerUrl } from '../services/socket';
-import { getSessionUser } from './useAuth';
+import { getSessionUser, currentAppUserId } from './useAuth';
 import type { ChatMessage } from '../types/message';
 import type { Conversation, ConversationThread } from '../types/conversation';
 
@@ -62,7 +62,7 @@ export function useChatSocket() {
     }
   ): Promise<{ conversation: Conversation; thread: ConversationThread; threads: ConversationThread[] }> => {
     const session = await getSessionUser();
-    const myUid = session?.uid;
+    const myUid = currentAppUserId.value || session?.id || session?.uid;
     if (!myUid) {
       throw new Error('You must be signed in to access conversations.');
     }
@@ -185,7 +185,7 @@ export function useChatSocket() {
    */
   const getConversationList = async (): Promise<Conversation[]> => {
     const session = await getSessionUser();
-    const myUid = session?.uid;
+    const myUid = currentAppUserId.value || session?.id || session?.uid;
     if (!myUid) return [];
 
     try {
@@ -331,7 +331,7 @@ export function useChatSocket() {
     imageKey?: string | null
   ): Promise<ChatMessage> => {
     const session = await getSessionUser();
-    const myUid = session?.uid;
+    const myUid = currentAppUserId.value || session?.id || session?.uid;
     if (!myUid) {
       throw new Error('You must be signed in to send messages.');
     }
@@ -386,7 +386,7 @@ export function useChatSocket() {
     threadId?: string
   ): Promise<Conversation | null> => {
     const session = await getSessionUser();
-    const myUid = session?.uid;
+    const myUid = currentAppUserId.value || session?.id || session?.uid;
     if (!myUid) return null;
 
     try {

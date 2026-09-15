@@ -156,7 +156,7 @@ import StatusBadge from "./StatusBadge.vue";
 import ShareModal from "./ShareModal.vue";
 import { hasValidDescription, type Post } from "../types/post";
 import { useLatestComment } from "../composables/useLatestComment";
-import { useProfiles } from "../composables/useProfiles";
+import { useProfiles, getProfileById, loadProfile } from "../composables/useProfiles";
 
 const props = defineProps<{
   post: Post;
@@ -178,8 +178,6 @@ const handleShareClick = (e?: MouseEvent) => {
   showShareModal.value = true;
 };
 
-const { getProfile, loadProfile } = useProfiles();
-
 watchEffect(() => {
   if (props.post.authorId) {
     loadProfile(props.post.authorId);
@@ -189,7 +187,7 @@ watchEffect(() => {
   }
 });
 
-const authorProfile = computed(() => getProfile(props.post.authorId));
+const authorProfile = computed(() => getProfileById(props.post.authorId));
 
 const authorName = computed(() => {
   return authorProfile.value?.name || props.post.authorName || "Community Member";
@@ -205,7 +203,7 @@ const authorAvatarUrl = computed(() => {
 
 const creditedHelper = computed(() => {
   if (!props.post.meritRecipientId) return null;
-  const p = getProfile(props.post.meritRecipientId);
+  const p = getProfileById(props.post.meritRecipientId);
   return {
     id: props.post.meritRecipientId,
     name: p?.name || "Community Member",

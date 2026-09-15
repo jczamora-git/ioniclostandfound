@@ -277,7 +277,8 @@ import MessageBubble from '../components/MessageBubble.vue';
 import ChatComposer, { type ReplyContext } from '../components/ChatComposer.vue';
 import { useChat } from '../composables/useChat';
 import { useConversations } from '../composables/useConversations';
-import { useAuth, sessionUid } from '../composables/useAuth';
+import { useAuth, currentAppUserId, sessionUid } from '../composables/useAuth';
+import { useProfiles } from '../composables/useProfiles';
 import { usePosts } from '../composables/usePosts';
 import { useImageUpload } from '../composables/useImageUpload';
 import { getChatServerUrl } from '../services/socket';
@@ -312,8 +313,9 @@ const { currentProfile } = useAuth();
 const { getPostById } = usePosts();
 const { markAsRead } = useConversations();
 const { uploadMessageImage } = useImageUpload();
+const { loadProfile, getProfileById } = useProfiles();
 
-const myUid = computed(() => sessionUid.value || currentProfile.value?.id || '');
+const myUid = computed(() => currentAppUserId.value || sessionUid.value || currentProfile.value?.id || '');
 
 const {
   messages,
@@ -569,56 +571,41 @@ onMounted(async () => {
   try {
     const { conversations: convList } = useConversations();
     const existing = convList.value.find((c) => c.id === conversationId.value);
+    const myId = myUid.value;
+    let convData: any = existing;
 
-    if (existing && existing.otherParticipant) {
-      otherParticipant.value = existing.otherParticipant;
+    if (!convData) {
+      try {
+        const snap = await get(dbRef(db, `conversations/${conversationId.value}`));
+        if (snap.exists()) {
+          convData = snap.val();
+        }
+      } catch {}
     }
 
-    if (!otherParticipant.value) {
-      const myId = myUid.value;
-      let convData: any = existing;
-
-      if (!convData) {
-        try {
-          const snap = await get(dbRef(db, `conversations/${conversationId.value}`));
-          if (snap.exists()) {
-            convData = snap.val();
-          }
-        } catch {}
-      }
-
-      if (convData) {
-        const otherUid = (convData.participantIds || []).find((id: string) => id !== myId);
-        if (otherUid) {
-          if (convData.participantDetails && convData.participantDetails[otherUid]) {
-            otherParticipant.value = {
-              id: otherUid,
-              name: convData.participantDetails[otherUid].name || 'Community Member',
-              username: convData.participantDetails[otherUid].username || 'user',
-              phone: '',
-              avatarUrl: convData.participantDetails[otherUid].avatarUrl || null,
-              createdAt: 0,
-              updatedAt: 0
-            };
-          } else {
-            try {
-              const pSnap = await get(dbRef(db, `profiles/${otherUid}`));
-              if (pSnap.exists()) {
-                const pVal = pSnap.val();
-                otherParticipant.value = {
-                  id: otherUid,
-                  name: pVal.name || 'Community Member',
-                  username: pVal.username || 'user',
-                  phone: '',
-                  avatarUrl: pVal.avatarUrl || null,
-                  createdAt: pVal.createdAt || 0,
-                  updatedAt: pVal.updatedAt || 0
-                };
-              }
-            } catch {}
-          }
+    if (convData) {
+      const otherUid = (convData.participantIds || []).find((id: string) => id !== myId);
+      if (otherUid) {
+        // First priority: canonical profiles collection via shared cache
+        const loaded = await loadProfile(otherUid);
+        if (loaded) {
+          otherParticipant.value = loaded;
+        } else if (convData.participantDetails && convData.participantDetails[otherUid]) {
+          otherParticipant.value = {
+            id: otherUid,
+            name: convData.participantDetails[otherUid].name || 'Community Member',
+            username: convData.participantDetails[otherUid].username || 'user',
+            phone: '',
+            avatarUrl: convData.participantDetails[otherUid].avatarUrl || null,
+            createdAt: 0,
+            updatedAt: 0
+          };
         }
       }
+    }
+
+    if (!otherParticipant.value && existing?.otherParticipant) {
+      otherParticipant.value = existing.otherParticipant;
     }
 
     if (!otherParticipant.value) {
