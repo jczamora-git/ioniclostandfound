@@ -329,14 +329,18 @@ export async function resolveUsername(rawUsername: string): Promise<string> {
   const serverUrl = getApiServerUrl();
   let resolvedEmail: string | null = null;
 
-  // 1. Preferred: Query Node/Express backend resolution endpoint
+  // 1. Preferred: Query Node/Express backend resolution endpoint with timeout
   if (serverUrl) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       const resp = await fetch(`${serverUrl}/api/auth/resolve-username`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: clean })
-      });
+        body: JSON.stringify({ username: clean }),
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId));
+
       if (resp.ok) {
         const data = await resp.json();
         if (data && data.success && data.email) {
@@ -349,7 +353,7 @@ export async function resolveUsername(rawUsername: string): Promise<string> {
       if (err.message === "Account not found.") {
         throw err;
       }
-      // If network failed to server, proceed to client RTDB fallback
+      // If network timed out or failed to server, proceed immediately to client RTDB fallback
     }
   }
 

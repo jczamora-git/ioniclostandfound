@@ -31,6 +31,7 @@
         :alt="post.title"
         class="post-image"
         loading="lazy"
+        decoding="async"
         @error="imageFailed = true"
       />
     </div>

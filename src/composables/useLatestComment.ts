@@ -1,5 +1,5 @@
-import { ref, onMounted, onUnmounted, watch } from "vue";
-import { ref as dbRef, onValue, query, limitToLast } from "firebase/database";
+import { ref, onMounted, watch } from "vue";
+import { ref as dbRef, get, query, limitToLast } from "firebase/database";
 import { db } from "../firebase";
 
 export interface LatestCommentPreview {
@@ -9,86 +9,96 @@ export interface LatestCommentPreview {
   createdAt: number;
 }
 
+const latestCommentCache = new Map<string, LatestCommentPreview | null>();
+const inFlightCommentRequests = new Map<string, Promise<LatestCommentPreview | null>>();
+
+export async function fetchLatestCommentForPost(postId: string): Promise<LatestCommentPreview | null> {
+  if (!postId) return null;
+  if (latestCommentCache.has(postId)) {
+    return latestCommentCache.get(postId) || null;
+  }
+  if (inFlightCommentRequests.has(postId)) {
+    return inFlightCommentRequests.get(postId)!;
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const commentsQuery = query(dbRef(db, `comments/${postId}`), limitToLast(1));
+      const snap = await get(commentsQuery);
+      if (!snap.exists()) {
+        latestCommentCache.set(postId, null);
+        return null;
+      }
+
+      const val = snap.val();
+      if (!val || typeof val !== "object") {
+        latestCommentCache.set(postId, null);
+        return null;
+      }
+
+      const entries = Object.entries(val);
+      if (entries.length === 0) {
+        latestCommentCache.set(postId, null);
+        return null;
+      }
+
+      const [id, c] = entries[entries.length - 1] as [string, any];
+      if (!c || typeof c !== "object") {
+        latestCommentCache.set(postId, null);
+        return null;
+      }
+
+      const content = typeof c.content === "string" ? c.content.trim() : "";
+      if (!content) {
+        latestCommentCache.set(postId, null);
+        return null;
+      }
+
+      const preview: LatestCommentPreview = {
+        id,
+        authorName:
+          typeof c.authorName === "string" && c.authorName.trim()
+            ? c.authorName.trim()
+            : "Community Member",
+        content,
+        createdAt: typeof c.createdAt === "number" ? c.createdAt : Date.now()
+      };
+      latestCommentCache.set(postId, preview);
+      return preview;
+    } catch {
+      latestCommentCache.set(postId, null);
+      return null;
+    } finally {
+      inFlightCommentRequests.delete(postId);
+    }
+  })();
+
+  inFlightCommentRequests.set(postId, fetchPromise);
+  return fetchPromise;
+}
+
+export function invalidateLatestCommentCache(postId: string) {
+  latestCommentCache.delete(postId);
+}
+
 export function useLatestComment(postIdGetter: () => string) {
   const latestComment = ref<LatestCommentPreview | null>(null);
-  let unsubscribe: (() => void) | null = null;
 
-  const subscribe = (postId: string) => {
-    if (unsubscribe) {
-      unsubscribe();
-      unsubscribe = null;
-    }
-
+  const load = async (postId: string) => {
     if (!postId) {
       latestComment.value = null;
       return;
     }
-
-    const commentsQuery = query(dbRef(db, `comments/${postId}`), limitToLast(1));
-    const unsub = onValue(
-      commentsQuery,
-      (snapshot) => {
-        if (!snapshot.exists()) {
-          latestComment.value = null;
-          return;
-        }
-
-        const val = snapshot.val();
-        if (!val || typeof val !== "object") {
-          latestComment.value = null;
-          return;
-        }
-
-        const entries = Object.entries(val);
-        if (entries.length === 0) {
-          latestComment.value = null;
-          return;
-        }
-
-        const [id, c] = entries[entries.length - 1] as [string, any];
-        if (!c || typeof c !== "object") {
-          latestComment.value = null;
-          return;
-        }
-
-        const content = typeof c.content === "string" ? c.content.trim() : "";
-        if (!content) {
-          latestComment.value = null;
-          return;
-        }
-
-        latestComment.value = {
-          id,
-          authorName:
-            typeof c.authorName === "string" && c.authorName.trim()
-              ? c.authorName.trim()
-              : "Community Member",
-          content,
-          createdAt: typeof c.createdAt === "number" ? c.createdAt : Date.now()
-        };
-      },
-      (error) => {
-        console.error(`Failed to subscribe to latest comment for post ${postId}:`, error);
-        latestComment.value = null;
-      }
-    );
-
-    unsubscribe = () => unsub();
+    const result = await fetchLatestCommentForPost(postId);
+    latestComment.value = result;
   };
 
   onMounted(() => {
-    subscribe(postIdGetter());
+    load(postIdGetter());
   });
 
   watch(postIdGetter, (newId) => {
-    subscribe(newId);
-  });
-
-  onUnmounted(() => {
-    if (unsubscribe) {
-      unsubscribe();
-      unsubscribe = null;
-    }
+    load(newId);
   });
 
   return {

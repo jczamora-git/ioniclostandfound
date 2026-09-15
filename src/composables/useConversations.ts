@@ -3,6 +3,7 @@ import { ref as dbRef, get } from 'firebase/database';
 import { db } from '../firebase';
 import { useAuth, getSessionUser, sessionUid } from './useAuth';
 import { usePosts } from './usePosts';
+import { useProfiles } from './useProfiles';
 import { getChatServerUrl } from '../services/socket';
 import {
   useChatSocket,
@@ -16,6 +17,7 @@ const conversations = ref<ConversationWithMeta[]>([]);
 const isConversationsLoading = ref(false);
 const hasConnectionError = ref(false);
 let globalListenerInitialized = false;
+let inFlightConversationsPromise: Promise<ConversationWithMeta[]> | null = null;
 
 export interface CreateConversationOptions {
   otherUserId: string;
@@ -130,14 +132,14 @@ export const createOrGetDirectConversation = (
 export function useConversations() {
   const { currentProfile } = useAuth();
   const { getPostById } = usePosts();
+  const { loadProfile } = useProfiles();
   const {
-    initSocket,
     getConversationList,
     markConversationAsRead
   } = useChatSocket();
 
   /**
-   * Helper to resolve participant profile from cache, conversation details, or RTDB/server.
+   * Helper to resolve participant profile from cache, conversation details, or RTDB.
    */
   const resolveOtherProfile = async (
     otherUid: string,
@@ -157,44 +159,9 @@ export function useConversations() {
       };
     }
 
-    // 2. Check Firebase RTDB profiles
-    try {
-      const snap = await get(dbRef(db, `profiles/${otherUid}`));
-      if (snap.exists()) {
-        const val = snap.val();
-        return {
-          id: otherUid,
-          name: val.name || 'Community Member',
-          username: val.username || 'user',
-          phone: '',
-          avatarUrl: val.avatarUrl || null,
-          createdAt: val.createdAt || 0,
-          updatedAt: val.updatedAt || 0
-        };
-      }
-    } catch {}
-
-    // 3. Fallback to server REST API
-    try {
-      const serverUrl = getChatServerUrl();
-      if (serverUrl) {
-        const res = await fetch(`${serverUrl}/api/profiles/${otherUid}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.profile) {
-            return {
-              id: otherUid,
-              name: data.profile.name || 'Community Member',
-              username: data.profile.username || 'user',
-              phone: '',
-              avatarUrl: data.profile.avatarUrl || null,
-              createdAt: 0,
-              updatedAt: 0
-            };
-          }
-        }
-      }
-    } catch {}
+    // 2. Check profile via shared cached loader
+    const loaded = await loadProfile(otherUid);
+    if (loaded) return loaded;
 
     return {
       id: otherUid,
@@ -209,7 +176,7 @@ export function useConversations() {
 
   /**
    * Mark a conversation read:
-   * Sets unread count to 0 immediately in local state and notifies server via socket.
+   * Sets unread count to 0 immediately in local state and updates Firebase RTDB.
    */
   const markAsRead = (conversationId: string, threadId?: string) => {
     const myUid = sessionUid.value || currentProfile.value?.id;
@@ -239,9 +206,11 @@ export function useConversations() {
       }
     }
 
-    // Emit to backend socket
+    // Update in RTDB
     markConversationAsRead(conversationId, threadId).catch((err) => {
-      console.warn('[useConversations] markConversationAsRead warning:', err);
+      if (import.meta.env.DEV) {
+        console.warn('[useConversations] markConversationAsRead warning:', err);
+      }
     });
   };
 
@@ -273,7 +242,7 @@ export function useConversations() {
   };
 
   /**
-   * Handle incoming conversation:updated socket event globally.
+   * Handle incoming conversation update.
    */
   const handleConversationUpdated = async (rawConv: Conversation) => {
     const myUid = sessionUid.value || currentProfile.value?.id;
@@ -289,7 +258,6 @@ export function useConversations() {
     const existingIndex = conversations.value.findIndex((c) => c.id === rawConv.id);
     if (existingIndex !== -1) {
       const existing = conversations.value[existingIndex];
-      // Update fields in place
       existing.lastMessage = rawConv.lastMessage;
       existing.lastMessageAt = rawConv.lastMessageAt;
       existing.lastMessageSenderId = rawConv.lastMessageSenderId;
@@ -319,7 +287,6 @@ export function useConversations() {
 
       sortConversations();
     } else {
-      // New conversation arrived: resolve metadata and add to top of list
       const otherUid = rawConv.participantIds.find((id) => id !== myUid);
       const otherProfile = otherUid ? await resolveOtherProfile(otherUid, rawConv) : null;
       let post = null;
@@ -341,138 +308,108 @@ export function useConversations() {
   };
 
   /**
-   * Subscribe to conversation updates and load initial list from persistent storage.
+   * Load conversation list on-demand from Firebase Realtime Database.
    */
-  const subscribeToConversations = async () => {
+  const subscribeToConversations = async (): Promise<ConversationWithMeta[]> => {
     const myUid = sessionUid.value || currentProfile.value?.id;
-    if (!myUid) return;
+    if (!myUid) return [];
 
-    isConversationsLoading.value = true;
+    if (inFlightConversationsPromise) {
+      return inFlightConversationsPromise;
+    }
+
+    if (conversations.value.length === 0) {
+      isConversationsLoading.value = true;
+    }
     hasConnectionError.value = false;
 
-    // Connect shared socket
-    try {
-      await initSocket();
-    } catch (e) {
-      if (import.meta.env.DEV) {
-        console.warn('[useConversations] Socket init warning:', e);
-      }
-    }
+    const startTime = performance.now();
 
-    // Initialize global listeners once
-    if (!globalListenerInitialized) {
-      globalListenerInitialized = true;
-      onConversationUpdated((conv) => {
-        handleConversationUpdated(conv);
-      });
-
-      onMessageNew((msg) => {
-        const target = conversations.value.find((c) => c.id === msg.conversationId);
-        if (target) {
-          target.lastMessage = msg.text;
-          target.lastMessageAt = msg.createdAt;
-          target.lastMessageSenderId = msg.senderId;
-          target.lastMessageThreadId = msg.threadId;
-          target.updatedAt = msg.createdAt;
-          const curUid = sessionUid.value || currentProfile.value?.id;
-          if (curUid && msg.senderId !== curUid) {
-            if (!target.unreadCounts) target.unreadCounts = {};
-            target.unreadCounts[curUid] = (target.unreadCounts[curUid] || 0) + 1;
-            target.unreadCount = (target.unreadCount || 0) + 1;
-            target.unread = true;
-          }
-          sortConversations();
-        }
-      });
-    }
-
-    // Load initial persistent conversations
-    try {
-      let rawList: Conversation[] = [];
-      let loadSuccess = false;
-
+    inFlightConversationsPromise = (async () => {
       try {
-        rawList = await getConversationList();
-        loadSuccess = true;
-      } catch {
-        // Fallback to REST endpoint
-        const serverUrl = getChatServerUrl();
-        if (serverUrl) {
-          const res = await fetch(`${serverUrl}/api/conversations/${myUid}`);
-          if (res.ok) {
-            const data = await res.json();
-            rawList = data.conversations || [];
-            loadSuccess = true;
-          }
-        }
-      }
+        const rawList = await getConversationList();
 
-      if (!loadSuccess && conversations.value.length === 0) {
-        hasConnectionError.value = true;
-      } else {
-        hasConnectionError.value = false;
-      }
+        // Deduplicate conversations so only ONE row appears per other participant
+        const userPairMap = new Map<string, Conversation>();
+        for (const rawConv of rawList) {
+          const otherUid = (rawConv.participantIds || []).find((id) => id !== myUid);
+          if (!otherUid) continue;
 
-      // Deduplicate conversations so only ONE row appears per other participant
-      const userPairMap = new Map<string, Conversation>();
-      for (const rawConv of rawList) {
-        const otherUid = (rawConv.participantIds || []).find((id) => id !== myUid);
-        if (!otherUid) continue;
-
-        if (!userPairMap.has(otherUid)) {
-          userPairMap.set(otherUid, rawConv);
-        } else {
-          const current = userPairMap.get(otherUid)!;
-          if ((rawConv.lastMessageAt || 0) > (current.lastMessageAt || 0)) {
+          if (!userPairMap.has(otherUid)) {
             userPairMap.set(otherUid, rawConv);
+          } else {
+            const current = userPairMap.get(otherUid)!;
+            if ((rawConv.lastMessageAt || 0) > (current.lastMessageAt || 0)) {
+              userPairMap.set(otherUid, rawConv);
+            }
           }
         }
-      }
 
-      const deduplicatedList = Array.from(userPairMap.values());
-      const loaded: ConversationWithMeta[] = [];
+        const deduplicatedList = Array.from(userPairMap.values());
 
-      for (const rawConv of deduplicatedList) {
-        const otherUid = (rawConv.participantIds || []).find((id) => id !== myUid);
-        const otherProfile = otherUid ? await resolveOtherProfile(otherUid, rawConv) : null;
-        let post = null;
-        if (rawConv.postId) {
-          post = await getPostById(rawConv.postId);
+        // Batch load all participant profiles and posts in parallel
+        const otherUids = deduplicatedList.map((c) => (c.participantIds || []).find((id) => id !== myUid));
+        const postIds = deduplicatedList.map((c) => c.postId).filter(Boolean) as string[];
+
+        await Promise.all([
+          useProfiles().loadProfiles(otherUids),
+          Promise.all(postIds.map((pid) => getPostById(pid)))
+        ]);
+
+        const loaded: ConversationWithMeta[] = [];
+
+        for (const rawConv of deduplicatedList) {
+          const otherUid = (rawConv.participantIds || []).find((id) => id !== myUid);
+          const otherProfile = otherUid ? await resolveOtherProfile(otherUid, rawConv) : null;
+          let post = null;
+          if (rawConv.postId) {
+            post = await getPostById(rawConv.postId);
+          }
+
+          const unreadCount =
+            typeof rawConv.unreadCounts?.[myUid] === 'number'
+              ? rawConv.unreadCounts[myUid]
+              : isConversationUnread(rawConv)
+              ? 1
+              : 0;
+
+          loaded.push({
+            ...rawConv,
+            otherParticipant: otherProfile,
+            post,
+            unread: unreadCount > 0,
+            unreadCount
+          });
         }
 
-        const unreadCount =
-          typeof rawConv.unreadCounts?.[myUid] === 'number'
-            ? rawConv.unreadCounts[myUid]
-            : isConversationUnread(rawConv)
-            ? 1
-            : 0;
+        loaded.sort((a, b) => (b.lastMessageAt || b.updatedAt) - (a.lastMessageAt || a.updatedAt));
+        conversations.value = loaded;
+        hasConnectionError.value = false;
 
-        loaded.push({
-          ...rawConv,
-          otherParticipant: otherProfile,
-          post,
-          unread: unreadCount > 0,
-          unreadCount
-        });
-      }
+        if (import.meta.env.DEV) {
+          const elapsed = (performance.now() - startTime).toFixed(1);
+          console.log(`[Perf] Messages: ${elapsed} ms (${loaded.length} conversations)`);
+        }
 
-      loaded.sort((a, b) => (b.lastMessageAt || b.updatedAt) - (a.lastMessageAt || a.updatedAt));
-      conversations.value = loaded;
-    } catch (err) {
-      if (import.meta.env.DEV) {
-        console.error('[useConversations] Failed to load conversations:', err);
+        return loaded;
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.error('[useConversations] Failed to load conversations:', err);
+        }
+        if (conversations.value.length === 0) {
+          hasConnectionError.value = true;
+        }
+        return conversations.value;
+      } finally {
+        isConversationsLoading.value = false;
+        inFlightConversationsPromise = null;
       }
-      if (conversations.value.length === 0) {
-        hasConnectionError.value = true;
-      }
-    } finally {
-      isConversationsLoading.value = false;
-    }
+    })();
+
+    return inFlightConversationsPromise;
   };
 
-  const stopConversationSubscription = () => {
-    // Keep global socket active for the session, no-op cleanup
-  };
+  const stopConversationSubscription = () => {};
 
   return {
     conversations,

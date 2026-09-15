@@ -158,7 +158,7 @@
           <AlertCircle :size="32" class="error-icon" />
           <p class="error-title">Couldn't load feed</p>
           <p class="error-sub">{{ postsError }}</p>
-          <button type="button" class="retry-btn" @click="subscribeToPosts">
+          <button type="button" class="retry-btn" @click="() => fetchPosts()">
             Retry
           </button>
         </div>
@@ -250,7 +250,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watchEffect, type Component } from "vue";
+import { computed, nextTick, onMounted, ref, watch, watchEffect, type Component } from "vue";
 import {
   IonContent,
   IonHeader,
@@ -287,6 +287,7 @@ import type { Post, PostFilter, PostFilters, PostFormData } from "../types/post"
 const {
   postsLoading,
   postsError,
+  fetchPosts,
   subscribeToPosts,
   getFilteredPosts,
   toggleHelpful,
@@ -306,6 +307,16 @@ const unreadBadgeFormatted = computed(() => {
 });
 
 const searchQuery = ref("");
+const debouncedSearchQuery = ref("");
+let searchDebounceTimer: any = null;
+
+watch(searchQuery, (newVal) => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    debouncedSearchQuery.value = newVal;
+  }, 300);
+});
+
 const showFilterSheet = ref(false);
 const appliedFilters = ref<PostFilters>({
   type: "All",
@@ -323,6 +334,7 @@ const openSearch = async () => {
 
 const closeSearch = () => {
   searchQuery.value = "";
+  debouncedSearchQuery.value = "";
   isSearchActive.value = false;
 };
 
@@ -406,11 +418,11 @@ const applyFilters = (filters: PostFilters) => {
 };
 
 onMounted(() => {
-  subscribeToPosts();
+  fetchPosts({ limit: 25 });
 });
 
 const filteredPosts = computed(() => {
-  return getFilteredPosts(appliedFilters.value.type, searchQuery.value, appliedFilters.value);
+  return getFilteredPosts(appliedFilters.value.type, debouncedSearchQuery.value, appliedFilters.value);
 });
 
 watchEffect(() => {
@@ -420,10 +432,11 @@ watchEffect(() => {
 });
 
 const handleRefresh = async (event: CustomEvent) => {
-  subscribeToPosts();
-  setTimeout(() => {
+  try {
+    await fetchPosts({ limit: 25, isRefresh: true });
+  } finally {
     event.detail.complete();
-  }, 600);
+  }
 };
 
 const handleToggleHelpful = async (postId: string) => {

@@ -32,59 +32,36 @@ export function useNotifications() {
     isSubscribed = true;
     loading.value = true;
 
-    // 1. Firebase RTDB listener
+    // 1. Firebase RTDB fetch/listener
     try {
       const notifsRef = dbRef(db, `notifications/${myUid}`);
-      onValue(notifsRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const val = snapshot.val();
-          Object.entries(val).forEach(([id, item]: [string, any]) => {
-            const existing = notifications.value.find((n) => n.id === id);
-            if (existing) {
-              existing.read = Boolean(item.read);
-            } else {
-              notifications.value.push({
-                id,
-                type: item.type || 'comment',
-                actorId: item.actorId || 'anonymous',
-                actorName: item.actorName || 'Community Member',
-                actorUsername: item.actorUsername,
-                actorAvatarUrl: item.actorAvatarUrl || null,
-                postId: item.postId,
-                postTitle: item.postTitle,
-                commentId: item.commentId,
-                text: item.text || '',
-                createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
-                read: Boolean(item.read)
-              });
-            }
+      const snap = await get(notifsRef);
+      if (snap.exists()) {
+        const val = snap.val();
+        const loaded: AppNotification[] = [];
+        Object.entries(val).forEach(([id, item]: [string, any]) => {
+          loaded.push({
+            id,
+            type: item.type || 'comment',
+            actorId: item.actorId || 'anonymous',
+            actorName: item.actorName || 'Community Member',
+            actorUsername: item.actorUsername,
+            actorAvatarUrl: item.actorAvatarUrl || null,
+            postId: item.postId,
+            postTitle: item.postTitle,
+            commentId: item.commentId,
+            text: item.text || '',
+            createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+            read: Boolean(item.read)
           });
-          sortNotifications();
-        }
-        loading.value = false;
-      });
+        });
+        notifications.value = loaded;
+        sortNotifications();
+      }
     } catch {
+    } finally {
       loading.value = false;
     }
-
-    // 2. Initial fetch / Fallback via REST
-    try {
-      const serverUrl = getApiServerUrl();
-      if (serverUrl) {
-        const res = await fetch(`${serverUrl}/api/notifications/${myUid}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.notifications)) {
-            data.notifications.forEach((notif: AppNotification) => {
-              if (!notifications.value.some((n) => n.id === notif.id)) {
-                notifications.value.push(notif);
-              }
-            });
-            sortNotifications();
-          }
-        }
-      }
-    } catch {}
   };
 
   /**
@@ -100,15 +77,6 @@ export function useNotifications() {
     if (myUid) {
       try {
         await update(dbRef(db, `notifications/${myUid}/${notificationId}`), { read: true });
-      } catch {}
-
-      try {
-        const serverUrl = getApiServerUrl();
-        if (serverUrl) {
-          fetch(`${serverUrl}/api/notifications/${myUid}/read/${notificationId}`, {
-            method: 'POST'
-          }).catch(() => {});
-        }
       } catch {}
     }
   };
@@ -129,15 +97,6 @@ export function useNotifications() {
           updates[`notifications/${myUid}/${n.id}/read`] = true;
         });
         await update(dbRef(db), updates);
-      } catch {}
-
-      try {
-        const serverUrl = getApiServerUrl();
-        if (serverUrl) {
-          fetch(`${serverUrl}/api/notifications/${myUid}/read-all`, {
-            method: 'POST'
-          }).catch(() => {});
-        }
       } catch {}
     }
   };

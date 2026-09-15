@@ -6,7 +6,9 @@ import {
   set,
   push,
   update,
-  remove
+  remove,
+  query,
+  limitToLast
 } from "firebase/database";
 import { db } from "../firebase";
 import { useAuth } from "./useAuth";
@@ -24,11 +26,12 @@ import { getCategoryConfig, normalizeCategoryKey } from "../config/categories";
 import { resolveCustomSubcategory, type ResolvedCustomSubcategory } from "./useCategories";
 
 const posts = ref<Post[]>([]);
-const postsLoading = ref(true);
+const postsLoading = ref(false);
+const postsRefreshing = ref(false);
 const postsError = ref("");
 const myHelpfulMap = ref<Record<string, boolean>>({});
 
-let isSubscribed = false;
+let inFlightPostsPromise: Promise<Post[]> | null = null;
 
 const resolvePendingSubcategory = async (
   data: Partial<PostFormData>,
@@ -81,16 +84,31 @@ export function usePosts() {
   const { currentProfile, currentUser } = useAuth();
   const { uploadPostImage, deleteUploadedFile } = useImageUpload();
 
-  const subscribeToPosts = () => {
-    if (isSubscribed) return;
-    isSubscribed = true;
-    postsLoading.value = true;
+  /**
+   * Fetch newest posts with limit constraint, request deduplication, and refresh retention.
+   */
+  const fetchPosts = async (options: { limit?: number; isRefresh?: boolean } = {}): Promise<Post[]> => {
+    const limitCount = options.limit || 25;
+    const isRefresh = Boolean(options.isRefresh);
 
-    const postsNode = dbRef(db, "posts");
-    onValue(
-      postsNode,
-      async (snapshot) => {
+    if (inFlightPostsPromise) {
+      return inFlightPostsPromise;
+    }
+
+    if (posts.value.length === 0 && !isRefresh) {
+      postsLoading.value = true;
+    } else {
+      postsRefreshing.value = true;
+    }
+
+    const startTime = performance.now();
+
+    inFlightPostsPromise = (async () => {
+      try {
+        const postsQuery = query(dbRef(db, "posts"), limitToLast(limitCount));
+        const snapshot = await get(postsQuery);
         const loaded: Post[] = [];
+
         if (snapshot.exists()) {
           const val = snapshot.val();
           Object.entries(val).forEach(([id, item]: [string, any]) => {
@@ -122,69 +140,51 @@ export function usePosts() {
           });
         }
 
-        // Check if legacy lost_found table has items not yet in posts
-        try {
-          const legacySnap = await get(dbRef(db, "lost_found"));
-          if (legacySnap.exists()) {
-            const legacyVal = legacySnap.val();
-            const existingIds = new Set(loaded.map((p) => p.id));
-            Object.entries(legacyVal).forEach(([id, item]: [string, any]) => {
-              if (!existingIds.has(id)) {
-                loaded.push({
-                  id,
-                  authorId: item.authorId || "legacy_user",
-                  authorName: item.authorName || "Legacy Post",
-                  authorUsername: item.authorUsername || "community",
-                  type: (item.type?.toLowerCase() === "found" ? "found" : "lost") as PostType,
-                  title: item.itemName || "Untitled Item",
-                  category: item.category || "Other",
-                  subCategory: item.subCategory || undefined,
-                  description: item.description || "",
-                  location: item.location || "Unknown location",
-                  eventDate: item.date || new Date().toISOString().split("T")[0],
-                  imageUrl: undefined,
-                  imageKey: undefined,
-                  status: (item.status === "Claimed" ? "resolved" : "open") as PostStatus,
-                  helpfulCount: 0,
-                  commentsCount: 0,
-                  createdAt: Date.now() - 86400000,
-                  updatedAt: Date.now() - 86400000
-                });
-              }
-            });
-          }
-        } catch (legacyErr) {
-          console.warn("Could not inspect legacy records:", legacyErr);
-        }
-
         // Sort chronological newest first (createdAt descending)
         loaded.sort((a, b) => b.createdAt - a.createdAt);
         posts.value = loaded;
-        postsLoading.value = false;
         postsError.value = "";
-      },
-      (error) => {
-        console.error("Posts subscription error:", error);
-        postsError.value = "Failed to load community posts.";
-        postsLoading.value = false;
-      }
-    );
 
-    // Also listen to current user's helpful node if logged in
-    if (currentUser.value) {
-      subscribeToMyHelpful(currentUser.value.uid);
+        if (import.meta.env.DEV) {
+          const elapsed = (performance.now() - startTime).toFixed(1);
+          console.log(`[Perf] Home posts: ${elapsed} ms (${loaded.length} posts)`);
+        }
+
+        return loaded;
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.error("Posts fetch error:", error);
+        }
+        postsError.value = "Failed to load community posts.";
+        return posts.value;
+      } finally {
+        postsLoading.value = false;
+        postsRefreshing.value = false;
+        inFlightPostsPromise = null;
+      }
+    })();
+
+    // Also load helpful map for current user in background
+    if (currentUser.value?.uid) {
+      loadMyHelpful(currentUser.value.uid);
     }
+
+    return inFlightPostsPromise;
   };
 
-  const subscribeToMyHelpful = (uid: string) => {
-    const helpfulUserRef = dbRef(db, `userHelpful/${uid}`);
-    onValue(helpfulUserRef, (snap) => {
+  const subscribeToPosts = (options?: { limit?: number }) => {
+    fetchPosts(options);
+  };
+
+  const loadMyHelpful = async (uid: string) => {
+    try {
+      const snap = await get(dbRef(db, `userHelpful/${uid}`));
       if (snap.exists()) {
         myHelpfulMap.value = snap.val() || {};
       } else {
         myHelpfulMap.value = {};
       }
-    });
+    } catch {}
   };
 
   const createPost = async (data: PostFormData): Promise<string> => {
@@ -490,7 +490,9 @@ export function usePosts() {
   return {
     posts,
     postsLoading,
+    postsRefreshing,
     postsError,
+    fetchPosts,
     subscribeToPosts,
     createPost,
     updatePost,

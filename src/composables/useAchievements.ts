@@ -1,5 +1,5 @@
-import { ref, computed } from 'vue';
-import { ref as dbRef, onValue, update } from 'firebase/database';
+import { ref } from 'vue';
+import { ref as dbRef, get, update, query, orderByChild, equalTo } from 'firebase/database';
 import { db } from '../firebase';
 import { useAuth, sessionUid, getSessionUser } from './useAuth';
 import { useNotifications } from './useNotifications';
@@ -11,62 +11,80 @@ import {
 } from '../types/achievement';
 import type { PostType } from '../types/post';
 
-// Shared global reactive achievements cache
-const achievements = ref<Achievement[]>([]);
-const achievementsLoading = ref(false);
-let isSubscribed = false;
+// Shared UID-keyed achievements cache
+const achievementsByUid = ref<Record<string, Achievement[]>>({});
+const inFlightAchievementRequests = new Map<string, Promise<Achievement[]>>();
+const postAchievementsCache = new Map<string, Achievement | null>();
 
 export function useAchievements() {
   const { currentProfile } = useAuth();
   const { createMeritNotification } = useNotifications();
 
   /**
-   * Subscribe to real-time achievements updates.
+   * Fetch achievements for a specific UID with in-flight deduplication.
    */
-  const subscribeToAchievements = () => {
-    if (isSubscribed) return;
-    isSubscribed = true;
-    achievementsLoading.value = true;
+  const loadUserAchievements = async (uid: string): Promise<Achievement[]> => {
+    if (!uid) return [];
+    if (achievementsByUid.value[uid]) {
+      return achievementsByUid.value[uid];
+    }
+    if (inFlightAchievementRequests.has(uid)) {
+      return inFlightAchievementRequests.get(uid)!;
+    }
 
-    try {
-      const achRef = dbRef(db, 'achievements');
-      onValue(achRef, (snap) => {
+    const fetchPromise = (async () => {
+      try {
+        const achQuery = query(
+          dbRef(db, 'achievements'),
+          orderByChild('recipientId'),
+          equalTo(uid)
+        );
+        const snap = await get(achQuery);
+        const list: Achievement[] = [];
         if (snap.exists()) {
           const val = snap.val();
-          const list: Achievement[] = [];
           Object.entries(val).forEach(([id, item]: [string, any]) => {
             if (item && item.type === 'community_merit') {
-              list.push({
+              const ach: Achievement = {
                 id,
                 type: 'community_merit',
                 postId: item.postId || '',
                 recipientId: item.recipientId || '',
                 awardedBy: item.awardedBy || '',
                 createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now()
-              });
+              };
+              list.push(ach);
+              if (ach.postId) {
+                postAchievementsCache.set(ach.postId, ach);
+              }
             }
           });
-          achievements.value = list;
-        } else {
-          achievements.value = [];
         }
-        achievementsLoading.value = false;
-      });
-    } catch (err) {
-      console.warn('[useAchievements] Subscription error:', err);
-      achievementsLoading.value = false;
-    }
+        achievementsByUid.value[uid] = list;
+        return list;
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('[useAchievements] Failed to fetch user merits:', err);
+        }
+        return [];
+      } finally {
+        inFlightAchievementRequests.delete(uid);
+      }
+    })();
+
+    inFlightAchievementRequests.set(uid, fetchPromise);
+    return fetchPromise;
   };
 
   /**
-   * Get all merit achievements awarded to a specific user UID.
+   * Get all merit achievements awarded to a specific user UID (sync read with bg fetch).
    */
   const getUserMerits = (uid: string | null | undefined): Achievement[] => {
     if (!uid) return [];
-    if (!isSubscribed) subscribeToAchievements();
-    return achievements.value.filter(
-      (a) => a.recipientId === uid && a.type === 'community_merit'
-    );
+    if (!achievementsByUid.value[uid] && !inFlightAchievementRequests.has(uid)) {
+      loadUserAchievements(uid);
+    }
+    return achievementsByUid.value[uid] || [];
   };
 
   /**
@@ -116,10 +134,7 @@ export function useAchievements() {
    */
   const getAchievementByPostId = (postId: string): Achievement | null => {
     if (!postId) return null;
-    if (!isSubscribed) subscribeToAchievements();
-    return achievements.value.find(
-      (a) => a.postId === postId && a.type === 'community_merit'
-    ) || null;
+    return postAchievementsCache.get(postId) || null;
   };
 
   /**
@@ -187,15 +202,17 @@ export function useAchievements() {
         postTitle: params.postTitle,
         awardedByName: awarderName
       }).catch((err) => {
-        console.warn('[useAchievements] Failed to deliver merit notification:', err);
+        if (import.meta.env.DEV) {
+          console.warn('[useAchievements] Failed to deliver merit notification:', err);
+        }
       });
     }
   };
 
   return {
-    achievements,
-    achievementsLoading,
-    subscribeToAchievements,
+    achievements: achievementsByUid,
+    loadUserAchievements,
+    subscribeToAchievements: (uid?: string) => (uid ? loadUserAchievements(uid) : Promise.resolve([])),
     getUserMerits,
     getMeritCount,
     getUserBadges,

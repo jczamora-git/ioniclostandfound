@@ -1,30 +1,41 @@
 import { ref } from 'vue';
-import { ref as dbRef, onValue, get } from 'firebase/database';
+import { ref as dbRef, get } from 'firebase/database';
 import { db } from '../firebase';
 import type { Profile } from '../types/profile';
 
-// Shared global reactive profile cache
-const profilesCache = ref<Record<string, Profile>>({});
-const activeListeners = new Set<string>();
+// Shared global reactive profile cache keyed by UID
+const profilesByUid = ref<Record<string, Profile>>({});
+const inFlightPromises = new Map<string, Promise<Profile | null>>();
 
 /**
- * Shared author profiles composable for real-time avatar and profile resolution.
+ * Shared author profiles composable for deduplicated, cached profile resolution.
  */
 export function useProfiles() {
   /**
-   * Load and subscribe to real-time updates for an author's profile by UID.
+   * Load a single profile by UID using cached in-memory record or deduplicated fetch.
    */
-  const loadProfile = (uid: string | null | undefined) => {
-    if (!uid || uid === 'anonymous' || uid === 'legacy_user' || uid === 'community') return;
-    if (activeListeners.has(uid)) return;
-    activeListeners.add(uid);
+  const loadProfile = async (uid: string | null | undefined): Promise<Profile | null> => {
+    if (!uid || uid === 'anonymous' || uid === 'legacy_user' || uid === 'community' || uid === 'user') {
+      return null;
+    }
 
-    try {
-      const profileRef = dbRef(db, `profiles/${uid}`);
-      onValue(profileRef, (snap) => {
+    // 1. Return immediately from cache if available
+    if (profilesByUid.value[uid]) {
+      return profilesByUid.value[uid];
+    }
+
+    // 2. Return in-flight promise if already requesting
+    if (inFlightPromises.has(uid)) {
+      return inFlightPromises.get(uid)!;
+    }
+
+    // 3. Perform one-time fetch and cache
+    const fetchPromise = (async () => {
+      try {
+        const snap = await get(dbRef(db, `profiles/${uid}`));
         if (snap.exists()) {
           const val = snap.val();
-          profilesCache.value[uid] = {
+          const profile: Profile = {
             id: uid,
             name: val.name || '',
             username: val.username || '',
@@ -36,31 +47,45 @@ export function useProfiles() {
             createdAt: typeof val.createdAt === 'number' ? val.createdAt : Date.now(),
             updatedAt: typeof val.updatedAt === 'number' ? val.updatedAt : Date.now()
           };
+          profilesByUid.value[uid] = profile;
+          return profile;
         }
-      });
-    } catch (err) {
-      console.warn(`[useProfiles] Could not attach listener for profile ${uid}:`, err);
-    }
+        return null;
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn(`[useProfiles] Error fetching profile for ${uid}:`, err);
+        }
+        return null;
+      } finally {
+        inFlightPromises.delete(uid);
+      }
+    })();
+
+    inFlightPromises.set(uid, fetchPromise);
+    return fetchPromise;
   };
 
   /**
-   * Batch load profiles for an array of author UIDs.
+   * Batch load and deduplicate profiles for an array of author UIDs in parallel.
    */
-  const loadProfiles = (uids: (string | null | undefined)[]) => {
-    uids.forEach((uid) => {
-      if (uid) loadProfile(uid);
-    });
+  const loadProfiles = async (uids: (string | null | undefined)[]): Promise<(Profile | null)[]> => {
+    const uniqueUids = Array.from(new Set(uids.filter((u): u is string => !!u && u !== 'anonymous' && u !== 'legacy_user' && u !== 'community' && u !== 'user')));
+    const uncached = uniqueUids.filter((uid) => !profilesByUid.value[uid]);
+    if (uncached.length === 0) {
+      return uniqueUids.map((uid) => profilesByUid.value[uid] || null);
+    }
+    return Promise.all(uncached.map((uid) => loadProfile(uid)));
   };
 
   /**
-   * Get cached profile for an author UID.
+   * Get cached profile for an author UID (sync read with background fetch if missing).
    */
   const getProfile = (uid: string | null | undefined): Profile | null => {
     if (!uid) return null;
-    if (!activeListeners.has(uid)) {
+    if (!profilesByUid.value[uid] && !inFlightPromises.has(uid)) {
       loadProfile(uid);
     }
-    return profilesCache.value[uid] || null;
+    return profilesByUid.value[uid] || null;
   };
 
   /**
@@ -73,16 +98,17 @@ export function useProfiles() {
   };
 
   /**
-   * Manually update the profile cache (e.g., immediately upon saving in EditProfile).
+   * Manually update/invalidate the profile cache immediately (e.g. after edit profile).
    */
   const setCachedProfile = (profile: Profile) => {
     if (profile && profile.id) {
-      profilesCache.value[profile.id] = { ...profile };
+      profilesByUid.value[profile.id] = { ...profile };
     }
   };
 
   return {
-    profilesCache,
+    profilesCache: profilesByUid,
+    profilesByUid,
     loadProfile,
     loadProfiles,
     getProfile,

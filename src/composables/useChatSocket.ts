@@ -181,47 +181,55 @@ export function useChatSocket() {
   };
 
   /**
-   * Fetch all conversations for active user.
+   * Fetch all conversations for active user directly from Firebase RTDB.
    */
   const getConversationList = async (): Promise<Conversation[]> => {
     const session = await getSessionUser();
     const myUid = session?.uid;
     if (!myUid) return [];
 
-    // 1. Fetch from RTDB
     try {
+      // 1. Check userConversations index
       const userConvsSnap = await get(dbRef(db, `userConversations/${myUid}`));
       if (userConvsSnap.exists()) {
         const convIds = Object.keys(userConvsSnap.val() || {});
-        const list: Conversation[] = [];
-
-        for (const cid of convIds) {
-          const cSnap = await get(dbRef(db, `conversations/${cid}`));
-          if (cSnap.exists()) {
-            list.push(cSnap.val());
+        if (convIds.length > 0) {
+          const snaps = await Promise.all(
+            convIds.map((cid) => get(dbRef(db, `conversations/${cid}`)))
+          );
+          const list: Conversation[] = [];
+          for (const s of snaps) {
+            if (s.exists()) {
+              list.push(s.val());
+            }
           }
+          if (list.length > 0) return list;
         }
-        if (list.length > 0) return list;
       }
-    } catch {}
 
-    // 2. Fallback to REST endpoint
-    const serverUrl = getApiServerUrl();
-    if (serverUrl) {
-      try {
-        const res = await fetch(`${serverUrl}/api/conversations/${myUid}`);
-        if (res.ok) {
-          const data = await res.json();
-          return data.conversations || [];
-        }
-      } catch {}
+      // 2. Direct conversations scan fallback
+      const allConvsSnap = await get(dbRef(db, 'conversations'));
+      if (allConvsSnap.exists()) {
+        const val = allConvsSnap.val();
+        const list: Conversation[] = [];
+        Object.values(val).forEach((c: any) => {
+          if (c && Array.isArray(c.participantIds) && c.participantIds.includes(myUid)) {
+            list.push(c);
+          }
+        });
+        return list;
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        console.warn('[useChatSocket] RTDB conversation fetch note:', err);
+      }
     }
 
     return [];
   };
 
   /**
-   * Fetch all threads for a specific conversation.
+   * Fetch all threads for a specific conversation directly from Firebase RTDB.
    */
   const getThreads = async (conversationId: string): Promise<ConversationThread[]> => {
     try {
@@ -236,17 +244,6 @@ export function useChatSocket() {
       }
     } catch {}
 
-    const serverUrl = getApiServerUrl();
-    if (serverUrl) {
-      try {
-        const res = await fetch(`${serverUrl}/api/conversations/${conversationId}/threads`);
-        if (res.ok) {
-          const data = await res.json();
-          return data.threads || [];
-        }
-      } catch {}
-    }
-
     return [
       {
         id: 'general',
@@ -260,7 +257,7 @@ export function useChatSocket() {
   };
 
   /**
-   * Fetch message history for a conversation.
+   * Fetch message history for a conversation directly from Firebase RTDB.
    */
   const getConversationMessages = async (
     conversationId: string,
@@ -268,7 +265,6 @@ export function useChatSocket() {
   ): Promise<ChatMessage[]> => {
     const list: ChatMessage[] = [];
 
-    // 1. Read directly from Firebase RTDB
     try {
       const snap = await get(dbRef(db, `messages/${conversationId}`));
       if (snap.exists()) {
@@ -320,22 +316,6 @@ export function useChatSocket() {
         }
       }
     } catch {}
-
-    // 2. Fallback to HTTP REST
-    const serverUrl = getApiServerUrl();
-    if (serverUrl) {
-      try {
-        const endpoint =
-          threadId === 'all'
-            ? `${serverUrl}/api/messages/${conversationId}`
-            : `${serverUrl}/api/messages/${conversationId}/${threadId}`;
-        const res = await fetch(endpoint);
-        if (res.ok) {
-          const data = await res.json();
-          return data.messages || [];
-        }
-      } catch {}
-    }
 
     return list;
   };

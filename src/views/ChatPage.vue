@@ -541,7 +541,7 @@ const handleRefreshMessages = async () => {
   isRefreshing.value = true;
   try {
     markAsRead(conversationId.value, 'all');
-    await loadHistory('all');
+    await loadHistory('all', true);
   } catch (err) {
     if (import.meta.env.DEV) {
       console.warn('[ChatPage] Manual refresh warning:', err);
@@ -579,27 +579,12 @@ onMounted(async () => {
       let convData: any = existing;
 
       if (!convData) {
-        // Fallback to server REST endpoint
         try {
-          const serverUrl = getChatServerUrl();
-          if (serverUrl && myId) {
-            const res = await fetch(`${serverUrl}/api/conversations/${myId}`);
-            if (res.ok) {
-              const json = await res.json();
-              convData = (json.conversations || []).find((c: any) => c.id === conversationId.value);
-            }
+          const snap = await get(dbRef(db, `conversations/${conversationId.value}`));
+          if (snap.exists()) {
+            convData = snap.val();
           }
         } catch {}
-
-        // Fallback to Firebase RTDB if available
-        if (!convData) {
-          try {
-            const snap = await get(dbRef(db, `conversations/${conversationId.value}`));
-            if (snap.exists()) {
-              convData = snap.val();
-            }
-          } catch {}
-        }
       }
 
       if (convData) {

@@ -2,17 +2,6 @@ import { createRouter, createWebHistory } from '@ionic/vue-router';
 import { RouteRecordRaw } from 'vue-router';
 import { useAuth } from '../composables/useAuth';
 
-import TabsPage from '../views/TabsPage.vue';
-import HomePage from '../views/HomePage.vue';
-import ProfilePage from '../views/ProfilePage.vue';
-import MessagesPage from '../views/MessagesPage.vue';
-import ChatPage from '../views/ChatPage.vue';
-import AuthPage from '../views/AuthPage.vue';
-import PostDetailsPage from '../views/PostDetailsPage.vue';
-import PublicProfilePage from '../views/PublicProfilePage.vue';
-import EditProfilePage from '../views/EditProfilePage.vue';
-import EditPostPage from '../views/EditPostPage.vue';
-
 const routes: Array<RouteRecordRaw> = [
   {
     path: '/',
@@ -21,16 +10,16 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: '/auth',
     name: 'Auth',
-    component: AuthPage
+    component: () => import('../views/AuthPage.vue')
   },
   {
     path: '/onboarding',
     name: 'Onboarding',
-    component: AuthPage
+    component: () => import('../views/AuthPage.vue')
   },
   {
     path: '/tabs',
-    component: TabsPage,
+    component: () => import('../views/TabsPage.vue'),
     children: [
       {
         path: '',
@@ -39,17 +28,17 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: 'home',
         name: 'Home',
-        component: HomePage
+        component: () => import('../views/HomePage.vue')
       },
       {
         path: 'messages',
         name: 'Messages',
-        component: MessagesPage
+        component: () => import('../views/MessagesPage.vue')
       },
       {
         path: 'profile',
         name: 'Profile',
-        component: ProfilePage
+        component: () => import('../views/ProfilePage.vue')
       }
     ]
   },
@@ -60,27 +49,27 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: '/chat/:conversationId',
     name: 'Chat',
-    component: ChatPage
+    component: () => import('../views/ChatPage.vue')
   },
   {
     path: '/post/:id',
     name: 'PostDetails',
-    component: PostDetailsPage
+    component: () => import('../views/PostDetailsPage.vue')
   },
   {
     path: '/profile/:uid',
     name: 'PublicProfile',
-    component: PublicProfilePage
+    component: () => import('../views/PublicProfilePage.vue')
   },
   {
     path: '/edit-profile',
     name: 'EditProfile',
-    component: EditProfilePage
+    component: () => import('../views/EditProfilePage.vue')
   },
   {
     path: '/edit-post/:id',
     name: 'EditPost',
-    component: EditPostPage
+    component: () => import('../views/EditPostPage.vue')
   },
   // Legacy route redirects
   {

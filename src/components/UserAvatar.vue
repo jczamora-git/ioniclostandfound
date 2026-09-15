@@ -9,6 +9,8 @@
       :src="avatarUrl"
       :alt="name"
       class="avatar-img"
+      loading="lazy"
+      decoding="async"
       @error="imageError = true"
     />
     <span v-else class="avatar-letter">{{ initial }}</span>

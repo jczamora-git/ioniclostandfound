@@ -50,30 +50,12 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
   const loadThreads = async (): Promise<ConversationThread[]> => {
     try {
       let list: ConversationThread[] = [];
-      try {
-        list = await getThreads(conversationId);
-      } catch {
-        const serverUrl = getChatServerUrl();
-        if (serverUrl) {
-          const res = await fetch(`${serverUrl}/api/conversations/${conversationId}/threads`);
-          if (res.ok) {
-            const data = await res.json();
-            list = data.threads || [];
-          }
-        }
-      }
-
-      // Check Firebase RTDB for threads if empty
-      if (!list || list.length === 0) {
-        try {
-          const snap = await get(dbRef(db, `conversationThreads/${conversationId}`));
-          if (snap.exists()) {
-            snap.forEach((c) => {
-              const val = c.val();
-              if (val) list.push({ ...val, id: c.key || val.id });
-            });
-          }
-        } catch {}
+      const snap = await get(dbRef(db, `conversationThreads/${conversationId}`));
+      if (snap.exists()) {
+        snap.forEach((c) => {
+          const val = c.val();
+          if (val) list.push({ ...val, id: c.key || val.id });
+        });
       }
 
       // Ensure General thread is present
@@ -94,124 +76,88 @@ export function useChat(conversationId: string, initialThreadId = 'general') {
       if (import.meta.env.DEV) {
         console.warn('[useChat] Failed to load threads:', err);
       }
-      return [];
+      return threads.value.length > 0 ? threads.value : [
+        {
+          id: 'general',
+          conversationId,
+          type: 'general',
+          title: 'General',
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        }
+      ];
     }
   };
 
-  const loadHistory = async (targetThreadId = 'all') => {
-    isMessagesLoading.value = true;
-    messageMap.clear();
-    messages.value = [];
+  const loadHistory = async (targetThreadId = 'all', isRefresh = false) => {
+    if (messages.value.length === 0 && !isRefresh) {
+      isMessagesLoading.value = true;
+    }
+
+    const startTime = performance.now();
 
     try {
-      // 1. Ensure threads are loaded first
-      const currentThreads = await loadThreads();
+      // 1. Ensure threads are loaded in parallel with messages
+      const [currentThreads, snap] = await Promise.all([
+        loadThreads(),
+        get(dbRef(db, `messages/${conversationId}`))
+      ]);
 
-      // 2. Fetch from socket server (all conversation messages)
-      let history: ChatMessage[] = [];
-      try {
-        history = await getConversationMessages(conversationId, targetThreadId);
-      } catch {
-        // Fallback to REST API
-        const serverUrl = getChatServerUrl();
-        if (serverUrl) {
-          try {
-            const endpoint =
-              targetThreadId === 'all'
-                ? `${serverUrl}/api/messages/${conversationId}`
-                : `${serverUrl}/api/messages/${conversationId}/${targetThreadId}`;
-            const res = await fetch(endpoint);
-            if (res.ok) {
-              const data = await res.json();
-              history = data.messages || [];
+      const newMap = new Map<string, ChatMessage>();
+
+      if (snap.exists()) {
+        snap.forEach((childSnap) => {
+          const val = childSnap.val();
+          if (!val) return;
+          if (typeof val.text === 'string' || val.senderId) {
+            // Legacy flat message: messages/{conversationId}/{messageId}
+            const mId = childSnap.key || val.id;
+            if (mId) {
+              newMap.set(mId, {
+                id: mId,
+                conversationId,
+                threadId: val.threadId || 'general',
+                senderId: val.senderId,
+                text: val.text || '',
+                imageUrl: val.imageUrl || null,
+                imageKey: val.imageKey || null,
+                createdAt: val.createdAt || Date.now(),
+                status: val.status || 'sent'
+              });
             }
-          } catch {}
-        }
-      }
-
-      history.forEach((m) => {
-        if (m && m.id) {
-          messageMap.set(m.id, {
-            ...m,
-            threadId: m.threadId || 'general'
-          });
-        }
-      });
-
-      // 3. Also query each known thread if history was sparse
-      if (currentThreads.length > 1 && messageMap.size === 0) {
-        for (const t of currentThreads) {
-          try {
-            const tMsgs = await getConversationMessages(conversationId, t.id);
-            tMsgs.forEach((m) => {
-              if (m && m.id) {
-                messageMap.set(m.id, {
-                  ...m,
-                  threadId: m.threadId || t.id
+          } else if (typeof val === 'object') {
+            // 3-level thread bucket: messages/{conversationId}/{threadId}/{messageId}
+            const threadKey = childSnap.key || 'general';
+            childSnap.forEach((msgSnap) => {
+              const mVal = msgSnap.val();
+              const mId = msgSnap.key || mVal?.id;
+              if (mVal && mId) {
+                newMap.set(mId, {
+                  id: mId,
+                  conversationId,
+                  threadId: mVal.threadId || threadKey,
+                  senderId: mVal.senderId,
+                  text: mVal.text || '',
+                  imageUrl: mVal.imageUrl || null,
+                  imageKey: mVal.imageKey || null,
+                  createdAt: mVal.createdAt || Date.now(),
+                  status: mVal.status || 'sent'
                 });
               }
             });
-          } catch {}
-        }
+          }
+        });
       }
 
-      // 4. Query Firebase RTDB directly (handles both 2-level and 3-level message paths)
-      try {
-        const snap = await get(dbRef(db, `messages/${conversationId}`));
-        if (snap.exists()) {
-          snap.forEach((childSnap) => {
-            const val = childSnap.val();
-            if (!val) return;
-            if (typeof val.text === 'string' || val.senderId) {
-              // Legacy flat message: messages/{conversationId}/{messageId}
-              const mId = childSnap.key || val.id;
-              if (mId && !messageMap.has(mId)) {
-                messageMap.set(mId, {
-                  id: mId,
-                  conversationId,
-                  threadId: val.threadId || 'general',
-                  senderId: val.senderId,
-                  text: val.text,
-                  imageUrl: val.imageUrl || null,
-                  imageKey: val.imageKey || null,
-                  createdAt: val.createdAt || Date.now(),
-                  status: val.status || 'sent'
-                });
-              }
-            } else if (typeof val === 'object') {
-              // 3-level thread bucket: messages/{conversationId}/{threadId}/{messageId}
-              const threadKey = childSnap.key || 'general';
-              childSnap.forEach((msgSnap) => {
-                const mVal = msgSnap.val();
-                const mId = msgSnap.key || mVal?.id;
-                if (mVal && mId && !messageMap.has(mId)) {
-                  messageMap.set(mId, {
-                    id: mId,
-                    conversationId,
-                    threadId: mVal.threadId || threadKey,
-                    senderId: mVal.senderId,
-                    text: mVal.text,
-                    imageUrl: mVal.imageUrl || null,
-                    imageKey: mVal.imageKey || null,
-                    createdAt: mVal.createdAt || Date.now(),
-                    status: mVal.status || 'sent'
-                  });
-                }
-              });
-            }
-          });
-        }
-      } catch (rtdbErr) {
-        if (import.meta.env.DEV) {
-          console.warn('[useChat] RTDB message fetch note:', rtdbErr);
-        }
-      }
-
+      // Update messageMap and sort
+      messageMap.clear();
+      newMap.forEach((v, k) => messageMap.set(k, v));
       sortAndSyncMessages();
 
       if (import.meta.env.DEV) {
+        const elapsed = (performance.now() - startTime).toFixed(1);
         console.log(
-          `[Chat] conversation: ${conversationId} | threads loaded: ${currentThreads.length} | merged messages: ${messages.value.length}`
+          `[Perf] Chat: ${elapsed} ms (conversation: ${conversationId} | threads: ${currentThreads.length} | messages: ${messages.value.length})`
         );
       }
     } catch (err) {

@@ -29,6 +29,7 @@
             alt="Attached photo"
             class="bubble-img"
             loading="lazy"
+            decoding="async"
           />
         </div>
 
