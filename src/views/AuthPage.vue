@@ -308,7 +308,7 @@ import { reactive, ref, onMounted, onBeforeUnmount } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { IonContent, IonPage, IonSpinner, toastController } from "@ionic/vue";
 import { Eye, EyeOff, AlertCircle, ArrowLeft } from "lucide-vue-next";
-import { useAuth, normalizeUsername, isDevBypassEnabled } from "../composables/useAuth";
+import { useAuth, normalizeUsername } from "../composables/useAuth";
 
 const router = useRouter();
 const route = useRoute();
@@ -529,13 +529,12 @@ const handleSignIn = async () => {
   if (!validateSignIn() || loading.value) return;
   loading.value = true;
   try {
-    const user = await signIn(signInForm.email, signInForm.password);
-    const isDev = isDevBypassEnabled() && (user as any)?.isDevAccount;
+    await signIn(signInForm.email, signInForm.password);
     const toast = await toastController.create({
-      message: isDev ? "Development test session restored." : "Signed in successfully!",
+      message: "Signed in successfully!",
       duration: 2000,
       position: "top",
-      color: isDev ? "warning" : "success"
+      color: "success"
     });
     await toast.present();
     router.replace("/tabs/home");
@@ -564,7 +563,7 @@ const handleCreateAccount = async () => {
   if (!validateAccountStep() || loading.value) return;
   loading.value = true;
   try {
-    const user = await signUp({
+    await signUp({
       name: signUpForm.name,
       username: signUpForm.username,
       phone: signUpForm.phone,
@@ -572,12 +571,11 @@ const handleCreateAccount = async () => {
       password: signUpForm.password
     });
 
-    const isDev = isDevBypassEnabled() && (user as any)?.isDevAccount;
     const toast = await toastController.create({
-      message: isDev ? "Development test account created." : "Account created successfully!",
-      duration: 2500,
+      message: "Account created successfully!",
+      duration: 2000,
       position: "top",
-      color: isDev ? "warning" : "success"
+      color: "success"
     });
     await toast.present();
     router.replace("/tabs/home");
