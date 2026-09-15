@@ -7,7 +7,7 @@ import HomePage from '../views/HomePage.vue';
 import ProfilePage from '../views/ProfilePage.vue';
 import MessagesPage from '../views/MessagesPage.vue';
 import ChatPage from '../views/ChatPage.vue';
-import OnboardingPage from '../views/OnboardingPage.vue';
+import AuthPage from '../views/AuthPage.vue';
 import PostDetailsPage from '../views/PostDetailsPage.vue';
 import PublicProfilePage from '../views/PublicProfilePage.vue';
 import EditProfilePage from '../views/EditProfilePage.vue';
@@ -19,9 +19,14 @@ const routes: Array<RouteRecordRaw> = [
     redirect: '/tabs/home'
   },
   {
+    path: '/auth',
+    name: 'Auth',
+    component: AuthPage
+  },
+  {
     path: '/onboarding',
     name: 'Onboarding',
-    component: OnboardingPage
+    component: AuthPage
   },
   {
     path: '/tabs',
@@ -99,17 +104,42 @@ const router = createRouter({
 
 // Authentication and Onboarding navigation guard
 router.beforeEach(async (to, from, next) => {
-  const { initAuth, hasProfile } = useAuth();
+  const { initializeAuthSession, currentUser, hasProfile } = useAuth();
   
-  // Await anonymous sign-in and profile fetch
-  await initAuth();
+  // Await auth initialization
+  await initializeAuthSession();
 
-  if (!hasProfile.value && to.path !== '/onboarding') {
-    next('/onboarding');
-  } else if (hasProfile.value && to.path === '/onboarding') {
-    next('/tabs/home');
+  const isAuthRoute = to.path === '/auth' || to.path === '/onboarding';
+  const user = currentUser.value;
+
+  if (!user) {
+    // 1. No authenticated user -> redirect to Auth screen
+    if (!isAuthRoute) {
+      next('/auth');
+    } else {
+      next();
+    }
+  } else if (user.isAnonymous) {
+    // 2. Authenticated anonymous user with unfinished account -> redirect to Create Account / Onboarding
+    if (!isAuthRoute) {
+      next('/auth');
+    } else {
+      next();
+    }
+  } else if (!hasProfile.value) {
+    // 3. Authenticated non-anonymous user without completed profile
+    if (!isAuthRoute) {
+      next('/auth');
+    } else {
+      next();
+    }
   } else {
-    next();
+    // 4. Authenticated non-anonymous user with full profile
+    if (isAuthRoute) {
+      next('/tabs/home');
+    } else {
+      next();
+    }
   }
 });
 

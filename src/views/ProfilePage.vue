@@ -53,7 +53,7 @@
         </div>
 
         <!-- Appearance & App Settings Row (Flattened, subtle border) -->
-        <section class="profile-settings-section" aria-label="Appearance settings">
+        <section class="profile-settings-section" aria-label="Account and Appearance settings">
           <button type="button" class="settings-item-btn" @click="openThemeSelector">
             <div class="settings-item-left">
               <div class="settings-icon-bubble">
@@ -63,6 +63,20 @@
             </div>
             <div class="settings-item-right">
               <span class="settings-item-value">{{ currentThemeLabel }}</span>
+              <ChevronRight :size="16" class="settings-chevron" />
+            </div>
+          </button>
+
+          <div class="settings-divider"></div>
+
+          <button type="button" class="settings-item-btn signout-item-btn" @click="handleSignOut">
+            <div class="settings-item-left">
+              <div class="settings-icon-bubble signout-bubble">
+                <LogOut :size="18" />
+              </div>
+              <span class="settings-item-label text-danger">Sign Out</span>
+            </div>
+            <div class="settings-item-right">
               <ChevronRight :size="16" class="settings-chevron" />
             </div>
           </button>
@@ -146,7 +160,8 @@ import {
   FileText,
   CircleHelp,
   SearchCheck,
-  LayoutGrid
+  LayoutGrid,
+  LogOut
 } from "lucide-vue-next";
 import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
@@ -157,9 +172,38 @@ import { useTheme } from "../composables/useTheme";
 import type { Post, PostFormData } from "../types/post";
 
 const router = useRouter();
-const { currentProfile } = useAuth();
+const { currentProfile, signOutUser } = useAuth();
 const { posts, toggleHelpful, isHelpfulByMe, createPost } = usePosts();
 const { themePreference, setTheme } = useTheme();
+
+const handleSignOut = async () => {
+  const actionSheet = await actionSheetController.create({
+    header: "Sign Out",
+    subHeader: "Are you sure you want to sign out of your account?",
+    buttons: [
+      {
+        text: "Sign Out",
+        role: "destructive",
+        handler: async () => {
+          await signOutUser();
+          const toast = await toastController.create({
+            message: "Signed out successfully.",
+            duration: 2000,
+            position: "top",
+            color: "medium"
+          });
+          await toast.present();
+          router.replace("/auth");
+        }
+      },
+      {
+        text: "Cancel",
+        role: "cancel"
+      }
+    ]
+  });
+  await actionSheet.present();
+};
 
 const currentThemeLabel = computed(() => {
   if (themePreference.value === "system") return "System Default";
@@ -487,6 +531,21 @@ const handleCreate = async (data: PostFormData) => {
 .settings-chevron {
   color: var(--app-text-tertiary);
   flex-shrink: 0;
+}
+
+.settings-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--app-card-border);
+}
+
+.signout-bubble {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--ion-color-danger, #ef4444);
+}
+
+.text-danger {
+  color: var(--ion-color-danger, #ef4444) !important;
 }
 
 /* My Posts Heading & Category Filter Pills */

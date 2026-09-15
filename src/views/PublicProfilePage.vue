@@ -231,15 +231,16 @@ const handleMessageUser = async () => {
   creatingChat.value = true;
   try {
     const currentUser = await getAuthenticatedUser();
-    if (!currentUser?.uid) {
-      console.error('[PublicProfile] Auth missing when attempting to message user.');
+    if (!currentUser?.uid || currentUser.isAnonymous) {
+      console.warn('[PublicProfile] Unauthenticated user, redirecting to Sign In.');
       const toast = await toastController.create({
-        message: 'Authentication session is still initializing. Please try again.',
+        message: 'Please sign in or create an account to message this member.',
         duration: 2500,
         position: 'top',
         color: 'warning'
       });
       await toast.present();
+      router.push('/auth');
       return;
     }
 
