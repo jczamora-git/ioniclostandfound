@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { auth } from '../firebase';
-import { getAuthenticatedUser } from '../composables/useAuth';
+import { getAuthenticatedUser, isDevBypassEnabled, getDevSession } from '../composables/useAuth';
 
 let socket: Socket | null = null;
 let connectPromise: Promise<Socket> | null = null;
@@ -8,26 +8,44 @@ let connectPromise: Promise<Socket> | null = null;
 const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
 
 /**
- * Retrieve current Firebase ID token.
+ * Retrieve socket auth payload:
+ * - Real Firebase Auth: returns ID token
+ * - Dev Bypass (development only): returns devUid and dev token
  */
-async function getIdToken(): Promise<string> {
+async function getSocketAuth(): Promise<{ token?: string; devUid?: string }> {
+  // 1. DEV bypass mode check
+  if (isDevBypassEnabled()) {
+    const devSession = getDevSession();
+    if (devSession && devSession.uid) {
+      return {
+        devUid: devSession.uid,
+        token: `dev_${devSession.uid}`
+      };
+    }
+  }
+
+  // 2. Real Firebase Auth
   let user = auth.currentUser;
   if (!user) {
     user = await getAuthenticatedUser();
   }
   if (user && typeof user.getIdToken === 'function') {
     try {
-      return await user.getIdToken();
+      const token = await user.getIdToken();
+      return { token };
     } catch (err) {
-      console.warn('[Socket] Failed to fetch ID token:', err);
+      if (import.meta.env.DEV) {
+        console.warn('[Socket] Failed to fetch Firebase ID token:', err);
+      }
     }
   }
 
-  return 'unauthenticated';
+  return {};
 }
 
 /**
  * Get or initialize the shared Socket.IO connection.
+ * Guarantees a single active socket instance per user session.
  */
 export async function getSocket(): Promise<Socket> {
   if (socket && socket.connected) {
@@ -40,47 +58,60 @@ export async function getSocket(): Promise<Socket> {
 
   connectPromise = new Promise(async (resolve, reject) => {
     try {
-      const token = await getIdToken();
+      const authPayload = await getSocketAuth();
 
+      // If socket exists but disconnected, update auth and reconnect
       if (socket) {
-        socket.disconnect();
+        socket.auth = authPayload;
+        if (!socket.connected) {
+          socket.connect();
+        }
+        resolve(socket);
+        return;
       }
 
       socket = io(SERVER_URL, {
-        auth: { token },
+        auth: authPayload,
         transports: ['websocket', 'polling'],
         reconnection: true,
-        reconnectionAttempts: 10,
+        reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         timeout: 20000
       });
 
       socket.on('connect', () => {
-        console.log('[Socket Service] Connected to chat server:', SERVER_URL, socket?.id);
+        if (import.meta.env.DEV) {
+          console.log('[Socket] connected', {
+            id: socket?.id,
+            devUid: authPayload.devUid
+          });
+        }
         resolve(socket!);
       });
 
       socket.on('connect_error', (err) => {
-        console.warn('[Socket Service] Connection error:', err.message);
-        // If connecting for the first time, still resolve or reject
-        if (!socket?.connected) {
-          // Keep attempting in background
+        if (import.meta.env.DEV) {
+          console.warn('[Socket] Connection error:', err.message);
         }
       });
 
       socket.on('disconnect', (reason) => {
-        console.log('[Socket Service] Disconnected:', reason);
+        if (import.meta.env.DEV) {
+          console.log('[Socket] disconnected', reason);
+        }
       });
 
-      // Timeout fallback to avoid blocking permanently
+      // Avoid hanging indefinitely if server is starting
       setTimeout(() => {
         if (socket) {
           resolve(socket);
         }
       }, 3000);
     } catch (err) {
-      console.error('[Socket Service] Initialization failed:', err);
+      if (import.meta.env.DEV) {
+        console.error('[Socket] Initialization failed:', err);
+      }
       reject(err);
     } finally {
       connectPromise = null;
@@ -91,17 +122,22 @@ export async function getSocket(): Promise<Socket> {
 }
 
 /**
- * Disconnect socket cleanly.
+ * Cleanly disconnect and tear down socket on sign-out.
  */
 export function disconnectSocket() {
   if (socket) {
+    socket.removeAllListeners();
     socket.disconnect();
     socket = null;
+    connectPromise = null;
+    if (import.meta.env.DEV) {
+      console.log('[Socket] disconnected');
+    }
   }
 }
 
 /**
- * Check socket connection status.
+ * Returns current socket connection status.
  */
 export function isSocketConnected(): boolean {
   return Boolean(socket && socket.connected);

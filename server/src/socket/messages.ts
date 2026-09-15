@@ -1,12 +1,17 @@
 import type { Server, Socket } from 'socket.io';
-import { getConversation, saveMessage } from '../firebaseAdmin.js';
+import {
+  getConversation,
+  getThread,
+  saveMessage,
+  getThreadMessages
+} from '../storage.js';
 import type { Message, SendMessagePayload } from '../types/chat.js';
 
 export function registerMessageHandlers(io: Server, socket: Socket) {
   const currentUid = socket.data.uid;
 
   /**
-   * Send a new message.
+   * Send a new message inside a specific conversation thread.
    */
   socket.on(
     'message:send',
@@ -15,10 +20,12 @@ export function registerMessageHandlers(io: Server, socket: Socket) {
       callback?: (res: { success: boolean; message?: Message; error?: string }) => void
     ) => {
       try {
-        const { conversationId, text } = payload;
+        const { conversationId, threadId: rawThreadId, text } = payload;
         if (!conversationId) {
           return callback?.({ success: false, error: 'conversationId is required' });
         }
+
+        const threadId = rawThreadId || 'general';
 
         const trimmed = (text || '').trim();
         if (!trimmed) {
@@ -45,22 +52,42 @@ export function registerMessageHandlers(io: Server, socket: Socket) {
           });
         }
 
-        const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const now = Date.now();
+        const messageId = `msg_${now}_${Math.random().toString(36).substring(2, 7)}`;
         const message: Message = {
           id: messageId,
           conversationId,
-          senderId: currentUid, // derived strictly from verified socket session
+          threadId,
+          senderId: currentUid,
           text: trimmed,
-          createdAt: Date.now(),
+          createdAt: now,
           status: 'sent'
         };
 
-        // Persist in Firebase RTDB
+        // Persist message and update thread/conversation unread counts
         await saveMessage(message);
 
-        // Broadcast to conversation room
-        const room = `conversation:${conversationId}`;
-        io.to(room).emit('message:new', message);
+        // Fetch updated thread and conversation state
+        const updatedThread = await getThread(conversationId, threadId);
+        const updatedConv = await getConversation(conversationId);
+
+        // 1. Broadcast message:new to the thread room (for viewers in this active thread)
+        io.to(`conversation:${conversationId}:thread:${threadId}`).emit('message:new', message);
+
+        // 2. Broadcast message:new to parent conversation room (for thread selector badge updates)
+        io.to(`conversation:${conversationId}`).emit('message:new', message);
+
+        // 3. Broadcast thread:updated to conversation room
+        if (updatedThread) {
+          io.to(`conversation:${conversationId}`).emit('thread:updated', updatedThread);
+        }
+
+        // 4. Broadcast conversation:updated to participant user rooms
+        if (updatedConv) {
+          for (const pId of updatedConv.participantIds) {
+            io.to(`user:${pId}`).emit('conversation:updated', updatedConv);
+          }
+        }
 
         callback?.({ success: true, message });
       } catch (err: any) {
@@ -71,21 +98,59 @@ export function registerMessageHandlers(io: Server, socket: Socket) {
   );
 
   /**
-   * Ephemeral Typing indicators (not persisted).
+   * Retrieve message history for a conversation thread.
    */
-  socket.on('typing:start', (conversationId: string) => {
-    if (conversationId) {
-      socket.to(`conversation:${conversationId}`).emit('typing:start', {
-        conversationId,
+  socket.on(
+    'messages:list',
+    async (
+      payload: { conversationId: string; threadId?: string },
+      callback?: (res: { success: boolean; messages?: Message[]; error?: string }) => void
+    ) => {
+      try {
+        const { conversationId, threadId: rawThreadId } = payload || {};
+        if (!conversationId) {
+          return callback?.({ success: false, error: 'conversationId is required' });
+        }
+
+        const threadId = rawThreadId || 'general';
+
+        const conv = await getConversation(conversationId);
+        if (!conv || !conv.participantIds.includes(currentUid)) {
+          return callback?.({
+            success: false,
+            error: 'Unauthorized or conversation not found'
+          });
+        }
+
+        const messages = await getThreadMessages(conversationId, threadId);
+        callback?.({ success: true, messages });
+      } catch (err: any) {
+        console.error('[messages:list error]:', err);
+        callback?.({ success: false, error: err.message || 'Failed to load messages' });
+      }
+    }
+  );
+
+  /**
+   * Ephemeral Typing indicators (per thread).
+   */
+  socket.on('typing:start', (payload: { conversationId: string; threadId?: string }) => {
+    if (payload?.conversationId) {
+      const threadId = payload.threadId || 'general';
+      socket.to(`conversation:${payload.conversationId}:thread:${threadId}`).emit('typing:start', {
+        conversationId: payload.conversationId,
+        threadId,
         uid: currentUid
       });
     }
   });
 
-  socket.on('typing:stop', (conversationId: string) => {
-    if (conversationId) {
-      socket.to(`conversation:${conversationId}`).emit('typing:stop', {
-        conversationId,
+  socket.on('typing:stop', (payload: { conversationId: string; threadId?: string }) => {
+    if (payload?.conversationId) {
+      const threadId = payload.threadId || 'general';
+      socket.to(`conversation:${payload.conversationId}:thread:${threadId}`).emit('typing:stop', {
+        conversationId: payload.conversationId,
+        threadId,
         uid: currentUid
       });
     }

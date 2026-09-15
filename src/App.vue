@@ -19,14 +19,29 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, watch } from "vue";
 import { IonApp, IonRouterOutlet, IonSpinner } from "@ionic/vue";
 import { useAuth } from "./composables/useAuth";
+import { useConversations } from "./composables/useConversations";
+import { useNotifications } from "./composables/useNotifications";
 
-const { isAuthReady, initializeAuthSession } = useAuth();
+const { isAuthReady, hasValidSession, initializeAuthSession } = useAuth();
+const { subscribeToConversations } = useConversations();
+const { subscribeToNotifications } = useNotifications();
 
-onMounted(() => {
-  initializeAuthSession();
+onMounted(async () => {
+  await initializeAuthSession();
+  if (hasValidSession.value) {
+    subscribeToConversations();
+    subscribeToNotifications();
+  }
+});
+
+watch(hasValidSession, (valid) => {
+  if (valid) {
+    subscribeToConversations();
+    subscribeToNotifications();
+  }
 });
 </script>
 

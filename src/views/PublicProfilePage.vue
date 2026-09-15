@@ -271,11 +271,12 @@ const handleMessageUser = async () => {
 
     const conv = await createOrGetConversation({
       otherUserId: targetUid,
-      postId: null
+      postId: null,
+      threadId: 'general'
     });
 
     if (conv && conv.id) {
-      await router.push(`/chat/${conv.id}`);
+      await router.push(`/chat/${conv.id}?thread=general`);
     } else {
       throw new Error('Unable to start conversation.');
     }

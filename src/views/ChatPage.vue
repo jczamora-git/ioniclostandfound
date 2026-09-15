@@ -28,8 +28,33 @@
           </PageHeader>
         </div>
 
-        <!-- Post Context Bar (Clickable to post details) -->
-        <PostChatContext :post="post" />
+        <!-- Compact Thread Selector -->
+        <div v-if="threads.length > 0" class="threads-selector-container">
+          <div class="threads-pills-row">
+            <button
+              v-for="t in threads"
+              :key="t.id"
+              type="button"
+              class="thread-tab-pill"
+              :class="{ active: activeThreadId === t.id }"
+              @click="handleSelectThread(t.id)"
+            >
+              <span class="thread-tab-title">{{ t.title || 'General' }}</span>
+              <span
+                v-if="getThreadUnread(t) > 0"
+                class="thread-tab-badge"
+              >
+                {{ getThreadUnread(t) > 99 ? '99+' : getThreadUnread(t) }}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Post Context Bar (Only shown when active thread is post-based) -->
+        <PostChatContext
+          v-if="activeThread?.type === 'post' && post"
+          :post="post"
+        />
 
         <!-- Public Meetup Safety Note -->
         <div class="safety-tip-bar">
@@ -45,9 +70,13 @@
           </div>
 
           <div v-else-if="messages.length === 0" class="chat-empty-thread">
-            <p class="empty-thread-title">No messages yet.</p>
+            <p class="empty-thread-title">No messages in this thread yet.</p>
             <p class="empty-thread-sub">
-              Ask about item details, verify ownership, or arrange a safe meetup.
+              {{
+                activeThread?.type === 'post'
+                  ? 'Ask about item details, verify ownership, or arrange a safe meetup.'
+                  : 'Send a message to start chatting directly.'
+              }}
             </p>
           </div>
 
@@ -96,17 +125,18 @@ import ChatComposer from '../components/ChatComposer.vue';
 import PostChatContext from '../components/PostChatContext.vue';
 import { useChat } from '../composables/useChat';
 import { useConversations } from '../composables/useConversations';
-import { useAuth, getSessionUser, sessionUid } from '../composables/useAuth';
-import { isDevChatActive, getDevConversationById } from '../services/devChatStorage';
+import { useAuth, sessionUid } from '../composables/useAuth';
 import { usePosts } from '../composables/usePosts';
 import { ref as dbRef, get } from 'firebase/database';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
 import type { Post } from '../types/post';
 import type { Profile } from '../types/profile';
+import type { ConversationThread } from '../types/conversation';
 
 const route = useRoute();
 const router = useRouter();
 const conversationId = computed(() => route.params.conversationId as string);
+const initialThreadQuery = computed(() => (route.query.thread as string) || 'general');
 
 const { currentProfile } = useAuth();
 const { getPostById } = usePosts();
@@ -114,14 +144,19 @@ const { markAsRead } = useConversations();
 
 const {
   messages,
+  threads,
+  activeThreadId,
+  activeThread,
   loading,
   isOtherTyping,
+  loadThreads,
   loadHistory,
+  switchThread,
   setupSocketListeners,
   sendText,
   handleTyping,
   cleanup
-} = useChat(conversationId.value);
+} = useChat(conversationId.value, initialThreadQuery.value);
 
 const post = ref<Post | null>(null);
 const otherParticipant = ref<Profile | null>(null);
@@ -129,14 +164,17 @@ const sending = ref(false);
 const scrollContainerRef = ref<HTMLDivElement | null>(null);
 
 const headerSubtitle = computed(() => {
-  if (post.value?.title) {
-    return `About: ${post.value.title}`;
-  }
   if (otherParticipant.value?.username) {
     return `@${otherParticipant.value.username}`;
   }
   return undefined;
 });
+
+const getThreadUnread = (t: ConversationThread): number => {
+  const uid = sessionUid.value || currentProfile.value?.id;
+  if (!uid || !t.unreadCounts) return 0;
+  return t.unreadCounts[uid] || 0;
+};
 
 const scrollToBottom = (smooth = true) => {
   nextTick(() => {
@@ -156,74 +194,133 @@ watch(
   }
 );
 
+// Helper to load post context for a specific thread
+const syncPostContext = async (thread?: ConversationThread) => {
+  const current = thread || activeThread.value;
+  if (current?.type === 'post' && current.postId) {
+    post.value = await getPostById(current.postId);
+  } else {
+    post.value = null;
+  }
+};
+
 onMounted(async () => {
-  markAsRead(conversationId.value);
+  markAsRead(conversationId.value, activeThreadId.value);
 
-  // Fetch conversation metadata
+  // 1. Fetch conversation participant metadata
   try {
-    let convData = null;
-    if (isDevChatActive()) {
-      convData = getDevConversationById(conversationId.value);
-    }
-    if (!convData) {
-      const snap = await get(dbRef(db, `conversations/${conversationId.value}`));
-      if (snap.exists()) {
-        convData = snap.val();
-      }
+    const { conversations: convList } = useConversations();
+    const existing = convList.value.find((c) => c.id === conversationId.value);
+
+    if (existing && existing.otherParticipant) {
+      otherParticipant.value = existing.otherParticipant;
     }
 
-    if (convData) {
-      if (convData.postId) {
-        post.value = await getPostById(convData.postId);
-      }
-
+    if (!otherParticipant.value) {
       const myUid = sessionUid.value || currentProfile.value?.id;
-      const otherUid = (convData.participantIds || []).find(
-        (id: string) => id !== myUid
-      );
-      if (otherUid) {
+      let convData: any = existing;
+
+      if (!convData) {
+        // Fallback to server REST endpoint
         try {
-          const pSnap = await get(dbRef(db, `profiles/${otherUid}`));
-          if (pSnap.exists()) {
-            const pVal = pSnap.val();
-            otherParticipant.value = {
-              id: otherUid,
-              name: pVal.name || 'Community Member',
-              username: pVal.username || 'user',
-              phone: '',
-              avatarUrl: pVal.avatarUrl || null,
-              createdAt: pVal.createdAt || 0,
-              updatedAt: pVal.updatedAt || 0
-            };
+          const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
+          const res = await fetch(`${SERVER_URL}/api/conversations/${myUid}`);
+          if (res.ok) {
+            const json = await res.json();
+            convData = (json.conversations || []).find((c: any) => c.id === conversationId.value);
           }
         } catch {}
 
-        if (!otherParticipant.value) {
-          otherParticipant.value = {
-            id: otherUid,
-            name: 'Community Member',
-            username: 'member',
-            phone: '',
-            avatarUrl: null,
-            createdAt: 0,
-            updatedAt: 0
-          };
+        // Fallback to Firebase RTDB if available
+        if (!convData) {
+          try {
+            const snap = await get(dbRef(db, `conversations/${conversationId.value}`));
+            if (snap.exists()) {
+              convData = snap.val();
+            }
+          } catch {}
         }
       }
+
+      if (convData) {
+        const otherUid = (convData.participantIds || []).find((id: string) => id !== myUid);
+        if (otherUid) {
+          if (convData.participantDetails && convData.participantDetails[otherUid]) {
+            otherParticipant.value = {
+              id: otherUid,
+              name: convData.participantDetails[otherUid].name || 'Community Member',
+              username: convData.participantDetails[otherUid].username || 'user',
+              phone: '',
+              avatarUrl: convData.participantDetails[otherUid].avatarUrl || null,
+              createdAt: 0,
+              updatedAt: 0
+            };
+          } else {
+            try {
+              const pSnap = await get(dbRef(db, `profiles/${otherUid}`));
+              if (pSnap.exists()) {
+                const pVal = pSnap.val();
+                otherParticipant.value = {
+                  id: otherUid,
+                  name: pVal.name || 'Community Member',
+                  username: pVal.username || 'user',
+                  phone: '',
+                  avatarUrl: pVal.avatarUrl || null,
+                  createdAt: pVal.createdAt || 0,
+                  updatedAt: pVal.updatedAt || 0
+                };
+              }
+            } catch {}
+          }
+        }
+      }
+    }
+
+    if (!otherParticipant.value) {
+      otherParticipant.value = {
+        id: 'user',
+        name: 'Community Member',
+        username: 'member',
+        phone: '',
+        avatarUrl: null,
+        createdAt: 0,
+        updatedAt: 0
+      };
     }
   } catch (err) {
     console.error('Failed to load conversation details:', err);
   }
 
-  await loadHistory();
+  // 2. Load threads
+  await loadThreads();
+
+  // If query specifies a thread, or if none, check if the initial thread exists
+  const requested = initialThreadQuery.value;
+  if (requested && threads.value.some((t) => t.id === requested)) {
+    activeThreadId.value = requested;
+  }
+
+  await syncPostContext();
+  await loadHistory(activeThreadId.value);
   await setupSocketListeners();
   scrollToBottom(false);
 });
 
 onUnmounted(() => {
-  markAsRead(conversationId.value);
+  markAsRead(conversationId.value, activeThreadId.value);
   cleanup();
 });
+
+const handleSelectThread = async (threadId: string) => {
+  if (threadId === activeThreadId.value) return;
+
+  await switchThread(threadId);
+  router.replace({ query: { ...route.query, thread: threadId } });
+
+  const selected = threads.value.find((t) => t.id === threadId);
+  await syncPostContext(selected);
+  scrollToBottom(false);
+};
 
 const handleSendMessage = async (text: string) => {
   if (!text || sending.value) return;
@@ -287,6 +384,79 @@ const handleOpenProfile = () => {
 
 .header-icon-btn:active {
   opacity: 0.7;
+}
+
+/* Compact Thread Selector Bar */
+.threads-selector-container {
+  padding: 4px 16px 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.threads-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0;
+}
+
+.threads-pills-row::-webkit-scrollbar {
+  display: none;
+}
+
+.thread-tab-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background-color: var(--app-surface-secondary);
+  border: 1px solid var(--app-card-border);
+  color: var(--app-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.thread-tab-pill:hover {
+  background-color: var(--app-surface-tertiary);
+  color: var(--app-text-primary);
+}
+
+.thread-tab-pill.active {
+  background-color: var(--app-primary, #2f9fe8);
+  color: #ffffff;
+  border-color: var(--app-primary, #2f9fe8);
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(47, 159, 232, 0.25);
+}
+
+.thread-tab-title {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-tab-badge {
+  background-color: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  line-height: 14px;
+}
+
+.thread-tab-pill.active .thread-tab-badge {
+  background-color: #ffffff;
+  color: var(--app-primary, #2f9fe8);
 }
 
 /* Meetup Safety Banner */

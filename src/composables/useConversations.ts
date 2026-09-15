@@ -1,39 +1,70 @@
 import { ref, computed } from 'vue';
-import { ref as dbRef, onValue, off, get, update } from 'firebase/database';
-import { db, auth } from '../firebase';
+import { ref as dbRef, get } from 'firebase/database';
+import { db } from '../firebase';
 import { useAuth, getSessionUser, sessionUid } from './useAuth';
 import { usePosts } from './usePosts';
 import {
-  isDevChatActive,
-  getDevConversations,
-  createOrGetDevConversation
-} from '../services/devChatStorage';
-import type { Conversation, ConversationWithMeta } from '../types/conversation';
+  useChatSocket,
+  onConversationUpdated,
+  onMessageNew
+} from './useChatSocket';
+import type { Conversation, ConversationThread, ConversationWithMeta } from '../types/conversation';
+import type { Profile } from '../types/profile';
 
 const conversations = ref<ConversationWithMeta[]>([]);
 const loading = ref(false);
-let listenerActive = false;
-let devUpdateHandler: (() => void) | null = null;
+let globalListenerInitialized = false;
 
 export interface CreateConversationOptions {
   otherUserId: string;
   postId?: string | null;
+  postTitle?: string;
+  postSubtitle?: string;
+  postLocation?: string;
+  threadId?: string;
 }
 
 /**
- * Shared helper to get or create a 1-to-1 conversation (post-based or direct user).
- * Uses real Firebase RTDB persistence when authenticated, or local dev storage during dev bypass.
+ * Total unread messages count for current active user across all conversations.
+ * Consumed by AppDock and page headers.
+ */
+export const totalUnreadCount = computed<number>(() => {
+  const myUid = sessionUid.value;
+  if (!myUid) return 0;
+
+  return conversations.value.reduce((total, conv) => {
+    const count =
+      typeof conv.unreadCounts?.[myUid] === 'number'
+        ? conv.unreadCounts[myUid]
+        : conv.unread
+        ? 1
+        : 0;
+    return total + count;
+  }, 0);
+});
+
+/**
+ * Shared helper to get or create a 1-to-1 conversation and target thread.
+ * Guarantees ONE conversation per pair of users.
  */
 export async function createOrGetConversation(
   arg1: CreateConversationOptions | string,
   arg2?: string | null
-): Promise<Conversation> {
+): Promise<Conversation & { thread?: ConversationThread; threadsList?: ConversationThread[] }> {
   let otherUserId = '';
   let postId: string | null | undefined = null;
+  let postTitle: string | undefined = undefined;
+  let postSubtitle: string | undefined = undefined;
+  let postLocation: string | undefined = undefined;
+  let threadId: string | undefined = undefined;
 
   if (typeof arg1 === 'object' && arg1 !== null) {
     otherUserId = arg1.otherUserId;
     postId = arg1.postId;
+    postTitle = arg1.postTitle;
+    postSubtitle = arg1.postSubtitle;
+    postLocation = arg1.postLocation;
+    threadId = arg1.threadId;
   } else if (typeof arg1 === 'string') {
     if (arg1.startsWith('post_') && arg2) {
       postId = arg1;
@@ -44,14 +75,12 @@ export async function createOrGetConversation(
     }
   }
 
-  // 1. Verify currentUser session
   const session = await getSessionUser();
   if (!session?.uid || (session.isAnonymous && !session.isDevAccount)) {
     throw new Error('You must be signed in to send messages.');
   }
   const currentUid = session.uid;
 
-  // 2. Verify target user
   if (!otherUserId || typeof otherUserId !== 'string' || otherUserId.trim() === '') {
     throw new Error('Unable to start conversation. Invalid recipient.');
   }
@@ -59,271 +88,360 @@ export async function createOrGetConversation(
     throw new Error('Cannot start a conversation with yourself.');
   }
 
-  // If in dev bypass mode, handle via local dev storage without failing Firebase rules
-  if (isDevChatActive() || session.isDevAccount) {
-    return createOrGetDevConversation(currentUid, otherUserId, postId);
-  }
-
-  // 3. Verify target user exists in Firebase profiles
-  try {
-    const targetSnap = await get(dbRef(db, `profiles/${otherUserId}`));
-    if (!targetSnap.exists()) {
-      throw new Error('Unable to start conversation. Target user does not exist.');
-    }
-  } catch (err: any) {
-    if (err.message?.includes('Target user does not exist')) {
-      throw err;
-    }
-    console.warn('[createOrGetConversation] Target profile check warning:', err);
-  }
-
   const normalizedPostId =
     postId && typeof postId === 'string' && postId.trim() !== '' ? postId.trim() : null;
-  const conversationType: 'post' | 'direct' = normalizedPostId ? 'post' : 'direct';
 
-  // 4. Duplicate prevention: Check userConversations/${currentUid}
-  try {
-    const userConvsSnap = await get(dbRef(db, `userConversations/${currentUid}`));
-    if (userConvsSnap.exists()) {
-      const userConvs = userConvsSnap.val();
-      for (const convId of Object.keys(userConvs)) {
-        const cSnap = await get(dbRef(db, `conversations/${convId}`));
-        if (cSnap.exists()) {
-          const c: Conversation = cSnap.val();
-          if (
-            Array.isArray(c.participantIds) &&
-            c.participantIds.includes(currentUid) &&
-            c.participantIds.includes(otherUserId)
-          ) {
-            // If post-based: must match the same postId
-            if (normalizedPostId) {
-              if (c.postId === normalizedPostId) {
-                console.log(`[createOrGetConversation] Found existing post conversation: ${convId}`);
-                return c;
-              }
-            } else {
-              // If direct chat: matches if type === 'direct' or no postId
-              if (!c.postId || c.type === 'direct') {
-                console.log(`[createOrGetConversation] Found existing direct conversation: ${convId}`);
-                return c;
-              }
-            }
-          }
-        }
-      }
+  const senderProfile = {
+    name: session.name || 'Member',
+    username: session.username || 'user',
+    avatarUrl: null
+  };
+
+  const { createOrGetConversation: socketCreateOrGet } = useChatSocket();
+  const res = await socketCreateOrGet(
+    normalizedPostId,
+    otherUserId,
+    senderProfile,
+    undefined,
+    {
+      threadId,
+      postTitle,
+      postSubtitle,
+      postLocation
     }
-  } catch (err) {
-    console.warn('[createOrGetConversation] Error checking existing conversations:', err);
-  }
+  );
 
-  // 5. Create new conversation with clean unique ID
-  const convId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const now = Date.now();
-  const newConv: Conversation = {
-    id: convId,
-    type: conversationType,
-    postId: normalizedPostId,
-    participantIds: [currentUid, otherUserId],
-    createdAt: now,
-    updatedAt: now
+  return {
+    ...res.conversation,
+    thread: res.thread,
+    threadsList: res.threads,
+    id: res.conversation.id
   };
-
-  // 6. Save to Firebase RTDB with atomic multi-path update
-  const updates: Record<string, any> = {};
-  updates[`conversations/${convId}`] = newConv;
-  updates[`userConversations/${currentUid}/${convId}`] = {
-    updatedAt: now,
-    postId: normalizedPostId,
-    type: conversationType
-  };
-  updates[`userConversations/${otherUserId}/${convId}`] = {
-    updatedAt: now,
-    postId: normalizedPostId,
-    type: conversationType
-  };
-
-  await update(dbRef(db), updates);
-  console.log(`[createOrGetConversation] Created and saved new conversation: ${convId} (${conversationType})`);
-
-  return newConv;
 }
 
 export const createOrGetDirectConversation = (
   otherUserId: string,
   postId?: string | null
-): Promise<Conversation> => createOrGetConversation({ otherUserId, postId });
+): Promise<Conversation & { thread?: ConversationThread }> =>
+  createOrGetConversation({ otherUserId, postId });
 
 export function useConversations() {
-  const { currentProfile, sessionUid, isDevBypassUser } = useAuth();
+  const { currentProfile } = useAuth();
   const { getPostById } = usePosts();
+  const {
+    initSocket,
+    getConversationList,
+    markConversationAsRead
+  } = useChatSocket();
 
-  const totalUnreadCount = computed(() => {
-    return conversations.value.filter((c) => c.unread).length;
-  });
-
-  const markAsRead = (conversationId: string) => {
-    localStorage.setItem(`laf_read_${conversationId}`, String(Date.now()));
-    const target = conversations.value.find((c) => c.id === conversationId);
-    if (target) {
-      target.unread = false;
+  /**
+   * Helper to resolve participant profile from cache, conversation details, or RTDB/server.
+   */
+  const resolveOtherProfile = async (
+    otherUid: string,
+    conv: Conversation
+  ): Promise<Profile> => {
+    // 1. Check embedded participantDetails first
+    if (conv.participantDetails && conv.participantDetails[otherUid]) {
+      const details = conv.participantDetails[otherUid];
+      return {
+        id: otherUid,
+        name: details.name || 'Community Member',
+        username: details.username || 'user',
+        phone: '',
+        avatarUrl: details.avatarUrl || null,
+        createdAt: 0,
+        updatedAt: 0
+      };
     }
+
+    // 2. Check Firebase RTDB profiles
+    try {
+      const snap = await get(dbRef(db, `profiles/${otherUid}`));
+      if (snap.exists()) {
+        const val = snap.val();
+        return {
+          id: otherUid,
+          name: val.name || 'Community Member',
+          username: val.username || 'user',
+          phone: '',
+          avatarUrl: val.avatarUrl || null,
+          createdAt: val.createdAt || 0,
+          updatedAt: val.updatedAt || 0
+        };
+      }
+    } catch {}
+
+    // 3. Fallback to server REST API
+    try {
+      const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
+      const res = await fetch(`${SERVER_URL}/api/profiles/${otherUid}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.profile) {
+          return {
+            id: otherUid,
+            name: data.profile.name || 'Community Member',
+            username: data.profile.username || 'user',
+            phone: '',
+            avatarUrl: data.profile.avatarUrl || null,
+            createdAt: 0,
+            updatedAt: 0
+          };
+        }
+      }
+    } catch {}
+
+    return {
+      id: otherUid,
+      name: 'Community Member',
+      username: 'member',
+      phone: '',
+      avatarUrl: null,
+      createdAt: 0,
+      updatedAt: 0
+    };
   };
 
-  const isUnread = (conv: Conversation): boolean => {
-    if (!conv.lastMessageAt || !conv.lastMessageSenderId) return false;
+  /**
+   * Mark a conversation read:
+   * Sets unread count to 0 immediately in local state and notifies server via socket.
+   */
+  const markAsRead = (conversationId: string, threadId?: string) => {
     const myUid = sessionUid.value || currentProfile.value?.id;
+    if (!myUid) return;
+
+    localStorage.setItem(`laf_read_${conversationId}`, String(Date.now()));
+
+    const target = conversations.value.find((c) => c.id === conversationId);
+    if (target) {
+      if (!target.unreadCounts) target.unreadCounts = {};
+      if (!threadId) {
+        target.unreadCounts[myUid] = 0;
+        target.unreadCount = 0;
+        target.unread = false;
+      } else if (target.threads && target.threads[threadId]) {
+        if (target.threads[threadId].unreadCounts) {
+          target.threads[threadId].unreadCounts![myUid] = 0;
+        }
+        // Recalculate sum
+        let sum = 0;
+        for (const t of Object.values(target.threads)) {
+          sum += t.unreadCounts?.[myUid] || 0;
+        }
+        target.unreadCounts[myUid] = sum;
+        target.unreadCount = sum;
+        target.unread = sum > 0;
+      }
+    }
+
+    // Emit to backend socket
+    markConversationAsRead(conversationId, threadId).catch((err) => {
+      console.warn('[useConversations] markConversationAsRead warning:', err);
+    });
+  };
+
+  /**
+   * Check if a conversation has unread messages for current user.
+   */
+  const isConversationUnread = (conv: Conversation): boolean => {
+    const myUid = sessionUid.value || currentProfile.value?.id;
+    if (!myUid) return false;
+
+    if (conv.unreadCounts && typeof conv.unreadCounts[myUid] === 'number') {
+      return conv.unreadCounts[myUid] > 0;
+    }
+
+    if (!conv.lastMessageAt || !conv.lastMessageSenderId) return false;
     if (conv.lastMessageSenderId === myUid) return false;
 
     const lastRead = Number(localStorage.getItem(`laf_read_${conv.id}`) || 0);
     return conv.lastMessageAt > lastRead;
   };
 
-  const subscribeToConversations = () => {
-    const uid = sessionUid.value || currentProfile.value?.id;
-    if (!uid) return;
+  /**
+   * Sort conversations by latest activity descending.
+   */
+  const sortConversations = () => {
+    conversations.value.sort(
+      (a, b) => (b.lastMessageAt || b.updatedAt) - (a.lastMessageAt || a.updatedAt)
+    );
+  };
 
-    if (listenerActive) return;
-    listenerActive = true;
-    loading.value = true;
+  /**
+   * Handle incoming conversation:updated socket event globally.
+   */
+  const handleConversationUpdated = async (rawConv: Conversation) => {
+    const myUid = sessionUid.value || currentProfile.value?.id;
+    if (!myUid || !rawConv || !rawConv.participantIds?.includes(myUid)) return;
 
-    // DEV BYPASS MODE: Read local dev conversations
-    if (isDevChatActive() || isDevBypassUser.value) {
-      const loadDevConvs = async () => {
-        const rawList = getDevConversations();
-        const loaded: ConversationWithMeta[] = [];
+    const unreadCount =
+      typeof rawConv.unreadCounts?.[myUid] === 'number'
+        ? rawConv.unreadCounts[myUid]
+        : isConversationUnread(rawConv)
+        ? 1
+        : 0;
 
-        for (const rawConv of rawList) {
-          const otherUid = (rawConv.participantIds || []).find((id) => id !== uid);
-          let otherProfile = null;
+    const existingIndex = conversations.value.findIndex((c) => c.id === rawConv.id);
+    if (existingIndex !== -1) {
+      const existing = conversations.value[existingIndex];
+      // Update fields in place
+      existing.lastMessage = rawConv.lastMessage;
+      existing.lastMessageAt = rawConv.lastMessageAt;
+      existing.lastMessageSenderId = rawConv.lastMessageSenderId;
+      existing.lastMessageThreadId = rawConv.lastMessageThreadId;
+      existing.lastMessageThreadTitle = rawConv.lastMessageThreadTitle;
+      existing.updatedAt = rawConv.updatedAt;
+      existing.unreadCounts = rawConv.unreadCounts;
+      existing.unreadCount = unreadCount;
+      existing.unread = unreadCount > 0;
+      if (rawConv.threads) existing.threads = rawConv.threads;
 
-          if (otherUid) {
-            try {
-              const pSnap = await get(dbRef(db, `profiles/${otherUid}`));
-              if (pSnap.exists()) {
-                const val = pSnap.val();
-                otherProfile = {
-                  id: otherUid,
-                  name: val.name || 'Community Member',
-                  username: val.username || 'user',
-                  phone: '',
-                  avatarUrl: val.avatarUrl || null,
-                  createdAt: val.createdAt || 0,
-                  updatedAt: val.updatedAt || 0
-                };
-              }
-            } catch {}
-
-            if (!otherProfile) {
-              otherProfile = {
-                id: otherUid,
-                name: 'Community Member',
-                username: 'member',
-                phone: '',
-                avatarUrl: null,
-                createdAt: 0,
-                updatedAt: 0
-              };
-            }
-          }
-
-          let post = null;
-          if (rawConv.postId) {
-            post = await getPostById(rawConv.postId);
-          }
-
-          loaded.push({
-            ...rawConv,
-            otherParticipant: otherProfile,
-            post,
-            unread: isUnread(rawConv)
-          });
+      if (rawConv.participantDetails) {
+        existing.participantDetails = rawConv.participantDetails;
+        const otherUid = rawConv.participantIds.find((id) => id !== myUid);
+        if (otherUid && rawConv.participantDetails[otherUid]) {
+          existing.otherParticipant = {
+            id: otherUid,
+            name: rawConv.participantDetails[otherUid].name,
+            username: rawConv.participantDetails[otherUid].username,
+            phone: '',
+            avatarUrl: rawConv.participantDetails[otherUid].avatarUrl || null,
+            createdAt: 0,
+            updatedAt: 0
+          };
         }
+      }
 
-        loaded.sort((a, b) => (b.lastMessageAt || b.updatedAt) - (a.lastMessageAt || a.updatedAt));
-        conversations.value = loaded;
-        loading.value = false;
+      sortConversations();
+    } else {
+      // New conversation arrived: resolve metadata and add to top of list
+      const otherUid = rawConv.participantIds.find((id) => id !== myUid);
+      const otherProfile = otherUid ? await resolveOtherProfile(otherUid, rawConv) : null;
+      let post = null;
+      if (rawConv.postId) {
+        post = await getPostById(rawConv.postId);
+      }
+
+      const newConvMeta: ConversationWithMeta = {
+        ...rawConv,
+        otherParticipant: otherProfile,
+        post,
+        unread: unreadCount > 0,
+        unreadCount
       };
 
-      loadDevConvs();
-      devUpdateHandler = loadDevConvs;
-      window.addEventListener('laf:dev-conversations-updated', devUpdateHandler);
-      window.addEventListener('laf:dev-message-new', devUpdateHandler);
-      return;
+      conversations.value.unshift(newConvMeta);
+      sortConversations();
+    }
+  };
+
+  /**
+   * Subscribe to conversation updates and load initial list from persistent storage.
+   */
+  const subscribeToConversations = async () => {
+    const myUid = sessionUid.value || currentProfile.value?.id;
+    if (!myUid) return;
+
+    loading.value = true;
+
+    // Connect shared socket
+    try {
+      await initSocket();
+    } catch (e) {
+      console.warn('[useConversations] Socket init warning:', e);
     }
 
-    // REAL FIREBASE RTDB MODE
-    const userConvsRef = dbRef(db, `userConversations/${uid}`);
-    onValue(userConvsRef, async (snapshot) => {
-      if (!snapshot.exists()) {
-        conversations.value = [];
-        loading.value = false;
-        return;
-      }
+    // Initialize global listeners once
+    if (!globalListenerInitialized) {
+      globalListenerInitialized = true;
+      onConversationUpdated((conv) => {
+        handleConversationUpdated(conv);
+      });
 
-      const convIds = Object.keys(snapshot.val());
-      const loaded: ConversationWithMeta[] = [];
+      onMessageNew((msg) => {
+        const target = conversations.value.find((c) => c.id === msg.conversationId);
+        if (target) {
+          target.lastMessage = msg.text;
+          target.lastMessageAt = msg.createdAt;
+          target.lastMessageSenderId = msg.senderId;
+          target.lastMessageThreadId = msg.threadId;
+          target.updatedAt = msg.createdAt;
+          sortConversations();
+        }
+      });
+    }
 
-      for (const convId of convIds) {
-        try {
-          const convSnap = await get(dbRef(db, `conversations/${convId}`));
-          if (convSnap.exists()) {
-            const rawConv: Conversation = convSnap.val();
-            const otherUid = rawConv.participantIds.find((id) => id !== uid);
+    // Load initial persistent conversations
+    try {
+      let rawList: Conversation[] = [];
 
-            // Fetch other participant profile
-            let otherProfile = null;
-            if (otherUid) {
-              const profileSnap = await get(dbRef(db, `profiles/${otherUid}`));
-              if (profileSnap.exists()) {
-                otherProfile = {
-                  id: otherUid,
-                  name: profileSnap.val().name || 'Community Member',
-                  username: profileSnap.val().username || 'user',
-                  phone: '',
-                  avatarUrl: profileSnap.val().avatarUrl || null,
-                  createdAt: profileSnap.val().createdAt || 0,
-                  updatedAt: profileSnap.val().updatedAt || 0
-                };
-              }
-            }
-
-            // Fetch associated post if present
-            let post = null;
-            if (rawConv.postId) {
-              post = await getPostById(rawConv.postId);
-            }
-
-            loaded.push({
-              ...rawConv,
-              otherParticipant: otherProfile,
-              post,
-              unread: isUnread(rawConv)
-            });
-          }
-        } catch (err) {
-          console.warn(`Failed to resolve conversation ${convId}:`, err);
+      try {
+        rawList = await getConversationList();
+      } catch {
+        // Fallback to REST endpoint
+        const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
+        const res = await fetch(`${SERVER_URL}/api/conversations/${myUid}`);
+        if (res.ok) {
+          const data = await res.json();
+          rawList = data.conversations || [];
         }
       }
 
-      // Sort by latest message / update
+      // Deduplicate conversations so only ONE row appears per other participant
+      const userPairMap = new Map<string, Conversation>();
+      for (const rawConv of rawList) {
+        const otherUid = (rawConv.participantIds || []).find((id) => id !== myUid);
+        if (!otherUid) continue;
+
+        if (!userPairMap.has(otherUid)) {
+          userPairMap.set(otherUid, rawConv);
+        } else {
+          const current = userPairMap.get(otherUid)!;
+          if ((rawConv.lastMessageAt || 0) > (current.lastMessageAt || 0)) {
+            userPairMap.set(otherUid, rawConv);
+          }
+        }
+      }
+
+      const deduplicatedList = Array.from(userPairMap.values());
+      const loaded: ConversationWithMeta[] = [];
+
+      for (const rawConv of deduplicatedList) {
+        const otherUid = (rawConv.participantIds || []).find((id) => id !== myUid);
+        const otherProfile = otherUid ? await resolveOtherProfile(otherUid, rawConv) : null;
+        let post = null;
+        if (rawConv.postId) {
+          post = await getPostById(rawConv.postId);
+        }
+
+        const unreadCount =
+          typeof rawConv.unreadCounts?.[myUid] === 'number'
+            ? rawConv.unreadCounts[myUid]
+            : isConversationUnread(rawConv)
+            ? 1
+            : 0;
+
+        loaded.push({
+          ...rawConv,
+          otherParticipant: otherProfile,
+          post,
+          unread: unreadCount > 0,
+          unreadCount
+        });
+      }
+
       loaded.sort((a, b) => (b.lastMessageAt || b.updatedAt) - (a.lastMessageAt || a.updatedAt));
       conversations.value = loaded;
+    } catch (err) {
+      console.error('[useConversations] Failed to load conversations:', err);
+    } finally {
       loading.value = false;
-    });
+    }
   };
 
   const stopConversationSubscription = () => {
-    if (devUpdateHandler) {
-      window.removeEventListener('laf:dev-conversations-updated', devUpdateHandler);
-      window.removeEventListener('laf:dev-message-new', devUpdateHandler);
-      devUpdateHandler = null;
-    }
-    const uid = sessionUid.value || currentProfile.value?.id;
-    if (uid && !isDevChatActive()) {
-      const userConvsRef = dbRef(db, `userConversations/${uid}`);
-      off(userConvsRef);
-    }
-    listenerActive = false;
+    // Keep global socket active for the session, no-op cleanup
   };
 
   return {

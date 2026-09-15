@@ -14,11 +14,26 @@
             <div class="header-actions-wrap">
               <button
                 type="button"
+                class="header-icon-btn bell-btn"
+                aria-label="Notifications"
+                @click="showNotificationsModal = true"
+              >
+                <Bell :size="21" />
+                <span
+                  v-if="unreadCount > 0"
+                  class="bell-unread-badge"
+                  aria-label="Unread notifications count"
+                >
+                  {{ unreadBadgeFormatted }}
+                </span>
+              </button>
+              <button
+                type="button"
                 class="header-icon-btn"
                 aria-label="Search lost and found posts"
                 @click="openSearch"
               >
-                <Search :size="22" />
+                <Search :size="21" />
               </button>
               <button
                 type="button"
@@ -220,6 +235,12 @@
       @close="showComposer = false"
       @submit="handleDirectCreate"
     />
+
+    <!-- Notifications Sheet Modal -->
+    <NotificationsModal
+      :is-open="showNotificationsModal"
+      @close="showNotificationsModal = false"
+    />
   </ion-page>
 </template>
 
@@ -233,6 +254,7 @@ import {
   toastController
 } from "@ionic/vue";
 import {
+  Bell,
   LayoutGrid,
   CircleHelp,
   SearchCheck,
@@ -247,8 +269,10 @@ import PostCard from "../components/PostCard.vue";
 import PostCardSkeleton from "../components/PostCardSkeleton.vue";
 import PostComposerModal from "../components/PostComposerModal.vue";
 import FilterSheetModal from "../components/FilterSheetModal.vue";
+import NotificationsModal from "../components/NotificationsModal.vue";
 import { useCategories } from "../composables/useCategories";
 import { usePosts } from "../composables/usePosts";
+import { useNotifications } from "../composables/useNotifications";
 import { normalizeCategoryKey } from "../config/categories";
 import type { Post, PostFilter, PostFilters, PostFormData } from "../types/post";
 
@@ -262,6 +286,15 @@ const {
   createPost
 } = usePosts();
 const { getSubcategoriesForCategory } = useCategories();
+const { unreadCount } = useNotifications();
+
+const showNotificationsModal = ref(false);
+
+const unreadBadgeFormatted = computed(() => {
+  if (unreadCount.value <= 0) return "";
+  if (unreadCount.value > 99) return "99+";
+  return String(unreadCount.value);
+});
 
 const searchQuery = ref("");
 const showFilterSheet = ref(false);
@@ -518,6 +551,29 @@ const handleDirectCreate = async (data: PostFormData) => {
 
 .header-icon-btn:active {
   opacity: 0.7;
+}
+
+.bell-unread-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background-color: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  border: 1.5px solid var(--app-bg, #ffffff);
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  letter-spacing: -0.3px;
 }
 
 .filter-btn.active {

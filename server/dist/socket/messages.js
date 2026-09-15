@@ -1,18 +1,16 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.registerMessageHandlers = registerMessageHandlers;
-const firebaseAdmin_js_1 = require("../firebaseAdmin.js");
-function registerMessageHandlers(io, socket) {
+import { getConversation, getThread, saveMessage, getThreadMessages } from '../storage.js';
+export function registerMessageHandlers(io, socket) {
     const currentUid = socket.data.uid;
     /**
-     * Send a new message.
+     * Send a new message inside a specific conversation thread.
      */
     socket.on('message:send', async (payload, callback) => {
         try {
-            const { conversationId, text } = payload;
+            const { conversationId, threadId: rawThreadId, text } = payload;
             if (!conversationId) {
                 return callback?.({ success: false, error: 'conversationId is required' });
             }
+            const threadId = rawThreadId || 'general';
             const trimmed = (text || '').trim();
             if (!trimmed) {
                 return callback?.({ success: false, error: 'Message cannot be empty' });
@@ -24,7 +22,7 @@ function registerMessageHandlers(io, socket) {
                 });
             }
             // Verify conversation membership
-            const conv = await (0, firebaseAdmin_js_1.getConversation)(conversationId);
+            const conv = await getConversation(conversationId);
             if (!conv) {
                 return callback?.({ success: false, error: 'Conversation not found' });
             }
@@ -34,20 +32,36 @@ function registerMessageHandlers(io, socket) {
                     error: 'Unauthorized: You are not a participant in this conversation'
                 });
             }
-            const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const now = Date.now();
+            const messageId = `msg_${now}_${Math.random().toString(36).substring(2, 7)}`;
             const message = {
                 id: messageId,
                 conversationId,
-                senderId: currentUid, // derived strictly from verified socket session
+                threadId,
+                senderId: currentUid,
                 text: trimmed,
-                createdAt: Date.now(),
+                createdAt: now,
                 status: 'sent'
             };
-            // Persist in Firebase RTDB
-            await (0, firebaseAdmin_js_1.saveMessage)(message);
-            // Broadcast to conversation room
-            const room = `conversation:${conversationId}`;
-            io.to(room).emit('message:new', message);
+            // Persist message and update thread/conversation unread counts
+            await saveMessage(message);
+            // Fetch updated thread and conversation state
+            const updatedThread = await getThread(conversationId, threadId);
+            const updatedConv = await getConversation(conversationId);
+            // 1. Broadcast message:new to the thread room (for viewers in this active thread)
+            io.to(`conversation:${conversationId}:thread:${threadId}`).emit('message:new', message);
+            // 2. Broadcast message:new to parent conversation room (for thread selector badge updates)
+            io.to(`conversation:${conversationId}`).emit('message:new', message);
+            // 3. Broadcast thread:updated to conversation room
+            if (updatedThread) {
+                io.to(`conversation:${conversationId}`).emit('thread:updated', updatedThread);
+            }
+            // 4. Broadcast conversation:updated to participant user rooms
+            if (updatedConv) {
+                for (const pId of updatedConv.participantIds) {
+                    io.to(`user:${pId}`).emit('conversation:updated', updatedConv);
+                }
+            }
             callback?.({ success: true, message });
         }
         catch (err) {
@@ -56,20 +70,49 @@ function registerMessageHandlers(io, socket) {
         }
     });
     /**
-     * Ephemeral Typing indicators (not persisted).
+     * Retrieve message history for a conversation thread.
      */
-    socket.on('typing:start', (conversationId) => {
-        if (conversationId) {
-            socket.to(`conversation:${conversationId}`).emit('typing:start', {
-                conversationId,
+    socket.on('messages:list', async (payload, callback) => {
+        try {
+            const { conversationId, threadId: rawThreadId } = payload || {};
+            if (!conversationId) {
+                return callback?.({ success: false, error: 'conversationId is required' });
+            }
+            const threadId = rawThreadId || 'general';
+            const conv = await getConversation(conversationId);
+            if (!conv || !conv.participantIds.includes(currentUid)) {
+                return callback?.({
+                    success: false,
+                    error: 'Unauthorized or conversation not found'
+                });
+            }
+            const messages = await getThreadMessages(conversationId, threadId);
+            callback?.({ success: true, messages });
+        }
+        catch (err) {
+            console.error('[messages:list error]:', err);
+            callback?.({ success: false, error: err.message || 'Failed to load messages' });
+        }
+    });
+    /**
+     * Ephemeral Typing indicators (per thread).
+     */
+    socket.on('typing:start', (payload) => {
+        if (payload?.conversationId) {
+            const threadId = payload.threadId || 'general';
+            socket.to(`conversation:${payload.conversationId}:thread:${threadId}`).emit('typing:start', {
+                conversationId: payload.conversationId,
+                threadId,
                 uid: currentUid
             });
         }
     });
-    socket.on('typing:stop', (conversationId) => {
-        if (conversationId) {
-            socket.to(`conversation:${conversationId}`).emit('typing:stop', {
-                conversationId,
+    socket.on('typing:stop', (payload) => {
+        if (payload?.conversationId) {
+            const threadId = payload.threadId || 'general';
+            socket.to(`conversation:${payload.conversationId}:thread:${threadId}`).emit('typing:stop', {
+                conversationId: payload.conversationId,
+                threadId,
                 uid: currentUid
             });
         }

@@ -10,6 +10,7 @@ import {
 } from "firebase/database";
 import { db } from "../firebase";
 import { useAuth } from "./useAuth";
+import { useNotifications } from "./useNotifications";
 import type { PostComment } from "../types/comment";
 
 export function useComments() {
@@ -86,16 +87,28 @@ export function useComments() {
 
     await set(newCommentRef, newComment);
 
-    // Update commentsCount on post
+    // Update commentsCount on post and notify post author
     try {
       const postRef = dbRef(db, `posts/${postId}`);
       const snap = await get(postRef);
       if (snap.exists()) {
-        const currentCount = snap.val().commentsCount || 0;
+        const postData = snap.val();
+        const currentCount = postData.commentsCount || 0;
         await update(postRef, { commentsCount: currentCount + 1 });
+
+        if (postData.authorId) {
+          const { createCommentNotification } = useNotifications();
+          createCommentNotification({
+            postAuthorId: postData.authorId,
+            postId,
+            postTitle: postData.title,
+            commentId,
+            commentText: cleanContent
+          }).catch((err) => console.warn("Failed to deliver comment notification:", err));
+        }
       }
     } catch (e) {
-      console.warn("Could not update commentsCount:", e);
+      console.warn("Could not update commentsCount or notify author:", e);
     }
 
     return commentId;

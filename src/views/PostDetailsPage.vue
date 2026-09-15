@@ -307,12 +307,17 @@ const handleMessagePoster = async () => {
       return;
     }
 
+    const targetThreadId = `post_${post.value.id}`;
     const conv = await createOrGetConversation({
       otherUserId: targetAuthorId,
-      postId: post.value.id
+      postId: post.value.id,
+      postTitle: post.value.title,
+      postSubtitle: `${post.value.type.toUpperCase()} · ${post.value.location}`,
+      postLocation: post.value.location,
+      threadId: targetThreadId
     });
     if (conv?.id) {
-      await router.push(`/chat/${conv.id}`);
+      await router.push(`/chat/${conv.id}?thread=${targetThreadId}`);
     } else {
       throw new Error("Unable to start conversation.");
     }

@@ -1,7 +1,7 @@
 <template>
   <div
     class="conversation-row"
-    :class="{ unread: conversation.unread }"
+    :class="{ unread: unreadCount > 0 }"
     @click="$emit('select', conversation.id)"
   >
     <!-- Avatar of the other user -->
@@ -12,23 +12,24 @@
         :avatar-url="conversation.otherParticipant?.avatarUrl"
         size="md"
       />
-      <span v-if="conversation.unread" class="unread-badge-dot" aria-label="Unread message"></span>
+      <span v-if="unreadCount > 0" class="unread-badge-dot" aria-label="Unread message"></span>
     </div>
 
     <!-- Details -->
     <div class="row-main">
       <div class="row-top-line">
         <span class="user-name">{{ conversation.otherParticipant?.name || 'Community Member' }}</span>
-        <span v-if="relativeTime" class="row-time">{{ relativeTime }}</span>
-      </div>
-
-      <div v-if="conversation.post" class="row-post-tag">
-        <span class="post-type-bullet" :class="conversation.post.type"></span>
-        <span class="post-title">{{ conversation.post.title }}</span>
+        <div class="row-meta-right">
+          <span v-if="unreadCount > 0" class="row-unread-count-badge">
+            {{ unreadCount > 99 ? '99+' : unreadCount }}
+          </span>
+          <span v-if="relativeTime" class="row-time">{{ relativeTime }}</span>
+        </div>
       </div>
 
       <p class="row-last-message">
-        {{ conversation.lastMessage || 'Conversation started' }}
+        <span v-if="postThreadTitle" class="thread-title-prefix">{{ postThreadTitle }} · </span>
+        <span>{{ conversation.lastMessage || 'Conversation started' }}</span>
       </p>
     </div>
   </div>
@@ -37,6 +38,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import UserAvatar from './UserAvatar.vue';
+import { sessionUid } from '../composables/useAuth';
 import type { ConversationWithMeta } from '../types/conversation';
 
 const props = defineProps<{
@@ -46,6 +48,18 @@ const props = defineProps<{
 defineEmits<{
   (e: 'select', id: string): void;
 }>();
+
+const unreadCount = computed<number>(() => {
+  const uid = sessionUid.value;
+  if (
+    uid &&
+    props.conversation.unreadCounts &&
+    typeof props.conversation.unreadCounts[uid] === 'number'
+  ) {
+    return props.conversation.unreadCounts[uid];
+  }
+  return props.conversation.unreadCount || (props.conversation.unread ? 1 : 0);
+});
 
 const relativeTime = computed(() => {
   const timestamp = props.conversation.lastMessageAt || props.conversation.updatedAt;
@@ -60,9 +74,22 @@ const relativeTime = computed(() => {
   const diffDays = Math.floor(diffHours / 24);
   return `${diffDays}d`;
 });
+
+const postThreadTitle = computed(() => {
+  const title = props.conversation.lastMessageThreadTitle;
+  if (title && title.toLowerCase() !== 'general' && title.trim() !== '') {
+    return title.trim();
+  }
+  return null;
+});
 </script>
 
 <style scoped>
+.thread-title-prefix {
+  font-weight: 600;
+  color: var(--app-primary, #2f9fe8);
+}
+
 .conversation-row {
   display: flex;
   align-items: center;
@@ -81,6 +108,10 @@ const relativeTime = computed(() => {
   background-color: var(--app-surface-tertiary);
 }
 
+.conversation-row.unread {
+  background-color: rgba(47, 159, 232, 0.04);
+}
+
 .row-avatar-wrap {
   position: relative;
   flex-shrink: 0;
@@ -90,11 +121,11 @@ const relativeTime = computed(() => {
   position: absolute;
   top: 0;
   right: 0;
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background-color: var(--app-primary);
-  border: 2px solid var(--app-surface);
+  background-color: var(--app-primary, #2f9fe8);
+  border: 1.5px solid var(--app-surface, #ffffff);
 }
 
 .row-main {
@@ -120,11 +151,33 @@ const relativeTime = computed(() => {
   white-space: nowrap;
 }
 
+.row-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.row-unread-count-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background-color: var(--app-primary, #2f9fe8);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .row-time {
   font-size: 12px;
   color: var(--app-text-tertiary);
   flex-shrink: 0;
-  margin-left: 8px;
 }
 
 .row-post-tag {
@@ -168,6 +221,7 @@ const relativeTime = computed(() => {
 
 .conversation-row.unread .user-name {
   font-weight: 700;
+  color: var(--app-text-primary);
 }
 
 .conversation-row.unread .row-last-message {

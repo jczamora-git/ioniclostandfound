@@ -402,9 +402,10 @@ export function useAuth() {
       const errCode = err?.code || "";
       if (errCode === "auth/configuration-not-found" && isDevBypassEnabled()) {
         console.warn("[DEV] Firebase Auth bypass enabled. This is not a real authenticated account.");
+        const cleanPrefix = (cleanName || cleanUsername || "user").toLowerCase().replace(/[^a-z0-9]/g, "");
         const devUid = (auth.currentUser?.isAnonymous && auth.currentUser?.uid)
           ? auth.currentUser.uid
-          : `dev_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          : `dev_${cleanPrefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 
         const devSession: DevSession = {
           uid: devUid,

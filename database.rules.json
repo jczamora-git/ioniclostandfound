@@ -59,9 +59,21 @@
         ".write": "auth != null"
       }
     },
+    "conversationThreads": {
+      "$conversationId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
     "messages": {
       "$conversationId": {
         ".read": "auth != null && (root.child('conversations/' + $conversationId + '/participantIds/0').val() === auth.uid || root.child('conversations/' + $conversationId + '/participantIds/1').val() === auth.uid)",
+        ".write": "auth != null"
+      }
+    },
+    "notifications": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null"
       }
     }

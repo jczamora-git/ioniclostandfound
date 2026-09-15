@@ -1,57 +1,49 @@
-import { ref, onUnmounted } from 'vue';
-import { ref as dbRef, get } from 'firebase/database';
-import { db } from '../firebase';
-import { useChatSocket } from './useChatSocket';
+import { ref, computed } from 'vue';
+import { useChatSocket, onMessageNew, onThreadUpdated } from './useChatSocket';
+import { useConversations } from './useConversations';
 import { useAuth } from './useAuth';
-import { isDevChatActive, getDevMessages, saveDevMessage } from '../services/devChatStorage';
 import type { ChatMessage } from '../types/message';
+import type { ConversationThread } from '../types/conversation';
 
-export function useChat(conversationId: string) {
-  const { initSocket, joinConversation, leaveConversation, sendMessage, emitTypingStart, emitTypingStop } =
-    useChatSocket();
+export function useChat(conversationId: string, initialThreadId = 'general') {
+  const {
+    initSocket,
+    joinConversation,
+    joinThread,
+    leaveThread,
+    leaveConversation,
+    sendMessage,
+    getConversationMessages,
+    getThreads,
+    emitTypingStart,
+    emitTypingStop
+  } = useChatSocket();
+  const { markAsRead } = useConversations();
   const { sessionUid } = useAuth();
 
+  const activeThreadId = ref<string>(initialThreadId || 'general');
+  const threads = ref<ConversationThread[]>([]);
   const messages = ref<ChatMessage[]>([]);
   const loading = ref(true);
   const isOtherTyping = ref(false);
+
   let typingTimer: any = null;
-  let devMessageHandler: ((e: any) => void) | null = null;
+  let unregisterMessageListener: (() => void) | null = null;
+  let unregisterThreadListener: (() => void) | null = null;
   const messageMap = new Map<string, ChatMessage>();
 
-  const loadHistory = async () => {
-    loading.value = true;
-
-    // DEV BYPASS MODE: Load local messages
-    if (isDevChatActive()) {
-      const devMsgs = getDevMessages(conversationId);
-      devMsgs.forEach((m) => {
-        if (m && m.id) {
-          messageMap.set(m.id, m);
-        }
-      });
-      sortAndSyncMessages();
-      loading.value = false;
-      return;
-    }
-
-    // REAL FIREBASE MODE
-    try {
-      const snap = await get(dbRef(db, `messages/${conversationId}`));
-      if (snap.exists()) {
-        const val = snap.val();
-        Object.values(val).forEach((m: any) => {
-          if (m && m.id) {
-            messageMap.set(m.id, m);
-          }
-        });
+  const activeThread = computed<ConversationThread | undefined>(() => {
+    return (
+      threads.value.find((t) => t.id === activeThreadId.value) || {
+        id: activeThreadId.value,
+        conversationId,
+        type: activeThreadId.value === 'general' ? 'general' : 'post',
+        title: activeThreadId.value === 'general' ? 'General' : 'Post Discussion',
+        createdAt: 0,
+        updatedAt: 0
       }
-      sortAndSyncMessages();
-    } catch (err) {
-      console.error('Failed to load message history from Firebase:', err);
-    } finally {
-      loading.value = false;
-    }
-  };
+    );
+  });
 
   const sortAndSyncMessages = () => {
     messages.value = Array.from(messageMap.values()).sort(
@@ -59,112 +51,218 @@ export function useChat(conversationId: string) {
     );
   };
 
-  const setupSocketListeners = async () => {
-    // DEV BYPASS MODE
-    if (isDevChatActive()) {
-      console.warn('[DEV] Chat is using development bypass session.');
-      devMessageHandler = (e: any) => {
-        const msg = e.detail;
-        if (msg && msg.conversationId === conversationId) {
-          messageMap.set(msg.id, msg);
-          sortAndSyncMessages();
-        }
-      };
-      window.addEventListener('laf:dev-message-new', devMessageHandler);
-      // Attempt socket connection softly in background; do not throw or break if unavailable
+  const loadThreads = async () => {
+    try {
+      let list: ConversationThread[] = [];
       try {
-        await initSocket();
-      } catch (err) {
-        console.warn('[DEV] Real-time socket unavailable for dev session:', err);
+        list = await getThreads(conversationId);
+      } catch {
+        const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
+        const res = await fetch(`${SERVER_URL}/api/conversations/${conversationId}/threads`);
+        if (res.ok) {
+          const data = await res.json();
+          list = data.threads || [];
+        }
       }
-      return;
+
+      // Ensure General thread is present
+      if (!list.some((t) => t.id === 'general')) {
+        list.unshift({
+          id: 'general',
+          conversationId,
+          type: 'general',
+          title: 'General',
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+      }
+
+      threads.value = list;
+    } catch (err) {
+      console.warn('[useChat] Failed to load threads:', err);
+    }
+  };
+
+  const loadHistory = async (targetThreadId?: string) => {
+    const threadToLoad = targetThreadId || activeThreadId.value || 'general';
+    loading.value = true;
+    messageMap.clear();
+    messages.value = [];
+
+    try {
+      let history: ChatMessage[] = [];
+      try {
+        history = await getConversationMessages(conversationId, threadToLoad);
+      } catch {
+        // Fallback to REST API
+        const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:3000';
+        const res = await fetch(`${SERVER_URL}/api/messages/${conversationId}/${threadToLoad}`);
+        if (res.ok) {
+          const data = await res.json();
+          history = data.messages || [];
+        }
+      }
+
+      history.forEach((m) => {
+        if (m && m.id) {
+          messageMap.set(m.id, m);
+        }
+      });
+      sortAndSyncMessages();
+    } catch (err) {
+      console.error('[useChat] Failed to load message history:', err);
+    } finally {
+      loading.value = false;
+    }
+  };
+
+  const switchThread = async (newThreadId: string) => {
+    if (newThreadId === activeThreadId.value) return;
+
+    const oldThreadId = activeThreadId.value;
+    leaveThread(conversationId, oldThreadId);
+
+    activeThreadId.value = newThreadId;
+    await joinThread(conversationId, newThreadId);
+
+    // Clear unread for new thread locally
+    const target = threads.value.find((t) => t.id === newThreadId);
+    const myUid = sessionUid.value;
+    if (target && target.unreadCounts && myUid) {
+      target.unreadCounts[myUid] = 0;
     }
 
-    // REAL SOCKET.IO MODE
+    markAsRead(conversationId, newThreadId);
+    await loadHistory(newThreadId);
+  };
+
+  const setupSocketListeners = async () => {
     try {
       const socket = await initSocket();
 
-      // Join room
-      await joinConversation(conversationId);
+      // Join conversation and thread rooms
+      await joinConversation(conversationId, activeThreadId.value);
+      await joinThread(conversationId, activeThreadId.value);
 
-      // Listen for new messages
-      socket.on('message:new', (msg: ChatMessage) => {
-        if (msg && msg.conversationId === conversationId) {
+      // Listen for thread updates
+      unregisterThreadListener = onThreadUpdated((updatedThread: ConversationThread) => {
+        if (updatedThread.conversationId === conversationId) {
+          const idx = threads.value.findIndex((t) => t.id === updatedThread.id);
+          if (idx !== -1) {
+            threads.value[idx] = { ...updatedThread };
+          } else {
+            threads.value.push({ ...updatedThread });
+          }
+        }
+      });
+
+      // Listen for incoming messages in real-time
+      unregisterMessageListener = onMessageNew((msg: ChatMessage) => {
+        if (!msg || msg.conversationId !== conversationId) return;
+
+        const msgThreadId = msg.threadId || 'general';
+
+        if (msgThreadId === activeThreadId.value) {
+          // Message belongs to currently open thread
           messageMap.set(msg.id, msg);
           sortAndSyncMessages();
+          markAsRead(conversationId, activeThreadId.value);
+        } else {
+          // Message belongs to another thread in this conversation:
+          // Update thread list badge
+          const t = threads.value.find((th) => th.id === msgThreadId);
+          const myUid = sessionUid.value;
+          if (t && myUid) {
+            if (!t.unreadCounts) t.unreadCounts = {};
+            t.unreadCounts[myUid] = (t.unreadCounts[myUid] || 0) + 1;
+            t.lastMessage = msg.text;
+            t.lastMessageAt = msg.createdAt;
+          }
         }
       });
 
-      // Listen for typing events
-      socket.on('typing:start', (data: { conversationId: string; uid: string }) => {
-        if (data.conversationId === conversationId) {
-          isOtherTyping.value = true;
-          clearTimeout(typingTimer);
-          typingTimer = setTimeout(() => {
+      // Ephemeral typing indicators
+      socket.on(
+        'typing:start',
+        (data: { conversationId: string; threadId?: string; uid: string }) => {
+          if (
+            data.conversationId === conversationId &&
+            (!data.threadId || data.threadId === activeThreadId.value) &&
+            data.uid !== sessionUid.value
+          ) {
+            isOtherTyping.value = true;
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(() => {
+              isOtherTyping.value = false;
+            }, 3000);
+          }
+        }
+      );
+
+      socket.on(
+        'typing:stop',
+        (data: { conversationId: string; threadId?: string; uid: string }) => {
+          if (
+            data.conversationId === conversationId &&
+            (!data.threadId || data.threadId === activeThreadId.value) &&
+            data.uid !== sessionUid.value
+          ) {
             isOtherTyping.value = false;
-          }, 3000);
+            clearTimeout(typingTimer);
+          }
         }
-      });
-
-      socket.on('typing:stop', (data: { conversationId: string; uid: string }) => {
-        if (data.conversationId === conversationId) {
-          isOtherTyping.value = false;
-          clearTimeout(typingTimer);
-        }
-      });
+      );
     } catch (err) {
       console.warn('[useChat] Socket listener setup warning:', err);
     }
   };
 
   const sendText = async (text: string): Promise<ChatMessage> => {
-    // DEV BYPASS MODE: Local simulated message dispatch
-    if (isDevChatActive()) {
-      const currentSenderId = sessionUid.value || 'dev_user';
-      const devMsg: ChatMessage = {
-        id: `msg_dev_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        conversationId,
-        senderId: currentSenderId,
-        text,
-        createdAt: Date.now()
-      };
+    const threadId = activeThreadId.value || 'general';
+    const msg = await sendMessage(conversationId, text, threadId);
 
-      saveDevMessage(conversationId, devMsg);
-      messageMap.set(devMsg.id, devMsg);
-      sortAndSyncMessages();
-      return devMsg;
-    }
-
-    // REAL SOCKET.IO MODE
-    const msg = await sendMessage(conversationId, text);
     messageMap.set(msg.id, msg);
     sortAndSyncMessages();
-    emitTypingStop(conversationId);
+
+    // Update active thread lastMessage locally
+    const curThread = threads.value.find((t) => t.id === threadId);
+    if (curThread) {
+      curThread.lastMessage = text;
+      curThread.lastMessageAt = msg.createdAt;
+    }
+
+    emitTypingStop(conversationId, threadId);
     return msg;
   };
 
   const handleTyping = () => {
-    if (!isDevChatActive()) {
-      emitTypingStart(conversationId);
-    }
+    emitTypingStart(conversationId, activeThreadId.value);
   };
 
   const cleanup = () => {
-    if (devMessageHandler) {
-      window.removeEventListener('laf:dev-message-new', devMessageHandler);
-      devMessageHandler = null;
+    if (unregisterMessageListener) {
+      unregisterMessageListener();
+      unregisterMessageListener = null;
     }
-    if (!isDevChatActive()) {
-      leaveConversation(conversationId);
+    if (unregisterThreadListener) {
+      unregisterThreadListener();
+      unregisterThreadListener = null;
     }
+    leaveThread(conversationId, activeThreadId.value);
+    leaveConversation(conversationId);
     clearTimeout(typingTimer);
   };
 
   return {
     messages,
+    threads,
+    activeThreadId,
+    activeThread,
     loading,
     isOtherTyping,
+    loadThreads,
     loadHistory,
+    switchThread,
     setupSocketListeners,
     sendText,
     handleTyping,

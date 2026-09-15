@@ -38,7 +38,13 @@
       >
         <div class="dock-icon-box relative-icon-box">
           <MessageCircle :size="20" :stroke-width="currentTab === 'messages' ? 2.3 : 1.9" class="dock-icon" />
-          <span v-if="totalUnreadCount > 0" class="dock-unread-dot" aria-label="Unread messages"></span>
+          <span
+            v-if="totalUnreadCount > 0"
+            class="dock-unread-badge"
+            aria-label="Unread messages count"
+          >
+            {{ totalUnreadFormatted }}
+          </span>
         </div>
         <span class="dock-label">Messages</span>
       </button>
@@ -61,6 +67,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { House, Plus, MessageCircle, UserRound } from "lucide-vue-next";
 import { useConversations } from "../composables/useConversations";
 
@@ -79,6 +86,12 @@ defineEmits<{
 }>();
 
 const { totalUnreadCount } = useConversations();
+
+const totalUnreadFormatted = computed(() => {
+  if (totalUnreadCount.value <= 0) return "";
+  if (totalUnreadCount.value > 99) return "99+";
+  return String(totalUnreadCount.value);
+});
 </script>
 
 <style scoped>
@@ -145,15 +158,27 @@ const { totalUnreadCount } = useConversations();
   position: relative;
 }
 
-.dock-unread-dot {
+.dock-unread-badge {
   position: absolute;
-  top: -1px;
-  right: -1px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background-color: var(--app-primary, #2f9fe8);
-  border: 1px solid var(--app-surface, #ffffff);
+  top: -5px;
+  right: -9px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background-color: #ef4444; /* red badge */
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  border: 1.5px solid var(--app-dock-bg, #ffffff);
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  letter-spacing: -0.3px;
 }
 
 .dock-icon {
