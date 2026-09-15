@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue';
 import { ref as dbRef, onValue, off, get, update } from 'firebase/database';
 import { db, auth } from '../firebase';
-import { useAuth } from './useAuth';
+import { useAuth, getAuthenticatedUser } from './useAuth';
 import { usePosts } from './usePosts';
 import type { Conversation, ConversationWithMeta } from '../types/conversation';
 
@@ -39,7 +39,10 @@ export async function createOrGetConversation(
   }
 
   // 1. Verify currentUser
-  const currentUser = auth.currentUser;
+  let currentUser = auth.currentUser;
+  if (!currentUser?.uid) {
+    currentUser = await getAuthenticatedUser();
+  }
   if (!currentUser?.uid) {
     throw new Error('You must be signed in to send messages.');
   }

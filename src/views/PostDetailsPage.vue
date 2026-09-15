@@ -226,7 +226,7 @@ import StatusBadge from "../components/StatusBadge.vue";
 import CommentList from "../components/CommentList.vue";
 import CommentComposer from "../components/CommentComposer.vue";
 import { auth } from "../firebase";
-import { useAuth } from "../composables/useAuth";
+import { useAuth, getAuthenticatedUser } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useComments } from "../composables/useComments";
 import { createOrGetConversation } from "../composables/useConversations";
@@ -266,47 +266,46 @@ const handleMoreOptions = () => {
 
 const handleMessagePoster = async () => {
   if (!post.value || creatingChat.value) return;
-
-  const currentUser = auth.currentUser;
-  if (!currentUser?.uid) {
-    console.error("[PostDetails] Auth missing when attempting to message poster.");
-    const toast = await toastController.create({
-      message: "Please sign in to message the poster.",
-      duration: 2500,
-      position: "top",
-      color: "warning"
-    });
-    await toast.present();
-    return;
-  }
-
-  if (isOwner.value || post.value.authorId === currentUser.uid) {
-    console.warn("[PostDetails] Cannot message on own post.");
-    const toast = await toastController.create({
-      message: "Unable to start conversation.",
-      duration: 2500,
-      position: "top",
-      color: "medium"
-    });
-    await toast.present();
-    return;
-  }
-
-  const targetAuthorId = post.value.authorId;
-  if (!targetAuthorId || typeof targetAuthorId !== "string") {
-    console.error("[PostDetails] Post author ID is missing or invalid.");
-    const toast = await toastController.create({
-      message: "Unable to start conversation.",
-      duration: 2500,
-      position: "top",
-      color: "danger"
-    });
-    await toast.present();
-    return;
-  }
-
   creatingChat.value = true;
   try {
+    const currentUser = await getAuthenticatedUser();
+    if (!currentUser?.uid) {
+      console.error("[PostDetails] Auth missing when attempting to message poster.");
+      const toast = await toastController.create({
+        message: "Authentication session is still initializing. Please try again.",
+        duration: 2500,
+        position: "top",
+        color: "warning"
+      });
+      await toast.present();
+      return;
+    }
+
+    if (isOwner.value || post.value.authorId === currentUser.uid) {
+      console.warn("[PostDetails] Cannot message on own post.");
+      const toast = await toastController.create({
+        message: "Unable to start conversation.",
+        duration: 2500,
+        position: "top",
+        color: "medium"
+      });
+      await toast.present();
+      return;
+    }
+
+    const targetAuthorId = post.value.authorId;
+    if (!targetAuthorId || typeof targetAuthorId !== "string") {
+      console.error("[PostDetails] Post author ID is missing or invalid.");
+      const toast = await toastController.create({
+        message: "Unable to start conversation.",
+        duration: 2500,
+        position: "top",
+        color: "danger"
+      });
+      await toast.present();
+      return;
+    }
+
     const conv = await createOrGetConversation({
       otherUserId: targetAuthorId,
       postId: post.value.id

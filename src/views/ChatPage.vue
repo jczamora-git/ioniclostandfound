@@ -96,7 +96,7 @@ import ChatComposer from '../components/ChatComposer.vue';
 import PostChatContext from '../components/PostChatContext.vue';
 import { useChat } from '../composables/useChat';
 import { useConversations } from '../composables/useConversations';
-import { useAuth } from '../composables/useAuth';
+import { useAuth, getAuthenticatedUser } from '../composables/useAuth';
 import { usePosts } from '../composables/usePosts';
 import { ref as dbRef, get } from 'firebase/database';
 import { db, auth } from '../firebase';
@@ -167,7 +167,11 @@ onMounted(async () => {
         post.value = await getPostById(convData.postId);
       }
 
-      const myUid = auth.currentUser?.uid || currentProfile.value?.id;
+      let myUid = auth.currentUser?.uid || currentProfile.value?.id;
+      if (!myUid) {
+        const u = await getAuthenticatedUser();
+        myUid = u?.uid || currentProfile.value?.id;
+      }
       const otherUid = (convData.participantIds || []).find(
         (id: string) => id !== myUid
       );

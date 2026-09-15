@@ -19,10 +19,15 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from "vue";
 import { IonApp, IonRouterOutlet, IonSpinner } from "@ionic/vue";
 import { useAuth } from "./composables/useAuth";
 
-const { isAuthReady } = useAuth();
+const { isAuthReady, initializeAuthSession } = useAuth();
+
+onMounted(() => {
+  initializeAuthSession();
+});
 </script>
 
 <style scoped>

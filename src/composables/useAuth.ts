@@ -18,113 +18,143 @@ const currentProfile = ref<Profile | null>(null);
 const isAuthReady = ref(false);
 const authLoading = ref(true);
 
-let authInitPromise: Promise<Profile | null> | null = null;
+let authInitPromise: Promise<User | null> | null = null;
 
 export const normalizeUsername = (username: string): string => {
   return username.trim().toLowerCase().replace(/[^a-z0-9_.]/g, "");
 };
 
-const getFallbackUid = (): string => {
-  let uid = localStorage.getItem("laf_device_uid");
-  if (!uid) {
-    uid = "user_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-    localStorage.setItem("laf_device_uid", uid);
+/**
+ * Single, unified authentication session initializer.
+ * Automatically enables Firebase Anonymous Authentication without generating custom local UIDs.
+ */
+export function initializeAuthSession(): Promise<User | null> {
+  if (authInitPromise) {
+    return authInitPromise;
   }
-  return uid;
-};
 
-export function useAuth() {
-  const initAuth = (): Promise<Profile | null> => {
-    if (authInitPromise) return authInitPromise;
+  authInitPromise = new Promise<User | null>((resolve) => {
+    let initialResolved = false;
 
-    authInitPromise = new Promise((resolve) => {
-      onAuthStateChanged(auth, async (user) => {
-        authLoading.value = true;
-        if (user) {
-          currentUser.value = user;
+    onAuthStateChanged(auth, async (user) => {
+      authLoading.value = true;
+      if (user) {
+        // Reuse existing Firebase user session
+        currentUser.value = user;
+        try {
           const profile = await fetchProfile(user.uid);
+          currentProfile.value = profile;
+        } catch (err) {
+          console.warn("[Auth] Error fetching profile for user:", err);
+        }
+        isAuthReady.value = true;
+        authLoading.value = false;
+
+        console.log("[Auth] initialized", {
+          authenticated: !!user,
+          uid: user?.uid
+        });
+
+        if (!initialResolved) {
+          initialResolved = true;
+          resolve(user);
+        }
+      } else {
+        // No Firebase user session found -> perform anonymous sign in
+        try {
+          const userCred = await signInAnonymously(auth);
+          currentUser.value = userCred.user;
+          const profile = await fetchProfile(userCred.user.uid);
           currentProfile.value = profile;
           isAuthReady.value = true;
           authLoading.value = false;
-          resolve(profile);
-        } else {
-          try {
-            const userCred = await signInAnonymously(auth);
-            currentUser.value = userCred.user;
-            const profile = await fetchProfile(userCred.user.uid);
-            currentProfile.value = profile;
-            isAuthReady.value = true;
-            authLoading.value = false;
-            resolve(profile);
-          } catch (error) {
-            console.warn("Firebase Anonymous Auth failed, using device identity:", error);
-            const fallbackUid = getFallbackUid();
-            currentUser.value = { uid: fallbackUid } as any;
-            const profile = await fetchProfile(fallbackUid);
-            currentProfile.value = profile;
-            isAuthReady.value = true;
-            authLoading.value = false;
-            resolve(profile);
+
+          console.log("[Auth] initialized", {
+            authenticated: !!userCred.user,
+            uid: userCred.user?.uid
+          });
+
+          if (!initialResolved) {
+            initialResolved = true;
+            resolve(userCred.user);
+          }
+        } catch (error) {
+          console.error("[Auth] Firebase Anonymous Auth failed:", error);
+          isAuthReady.value = true;
+          authLoading.value = false;
+          if (!initialResolved) {
+            initialResolved = true;
+            resolve(null);
           }
         }
-      });
+      }
     });
+  });
 
-    return authInitPromise;
-  };
+  return authInitPromise;
+}
 
-  const fetchProfile = async (uid: string): Promise<Profile | null> => {
-    try {
-      const snap = await get(dbRef(db, `profiles/${uid}`));
-      if (snap.exists()) {
-        const val = snap.val();
-        return {
-          id: uid,
-          name: val.name || "",
-          username: val.username || "",
-          phone: val.phone || "",
-          avatarUrl: val.avatarUrl || null,
-          avatarPath: val.avatarPath || null,
-          createdAt: val.createdAt || Date.now(),
-          updatedAt: val.updatedAt || Date.now()
-        };
-      }
-      return null;
-    } catch (err) {
-      console.error("Failed to fetch profile:", err);
-      return null;
+/**
+ * Returns the currently authenticated Firebase user, waiting for initialization if in flight.
+ */
+export async function getAuthenticatedUser(): Promise<User | null> {
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+  return await initializeAuthSession();
+}
+
+export const fetchProfile = async (uid: string): Promise<Profile | null> => {
+  if (!uid) return null;
+  try {
+    const snap = await get(dbRef(db, `profiles/${uid}`));
+    if (snap.exists()) {
+      const val = snap.val();
+      return {
+        id: uid,
+        name: val.name || "",
+        username: val.username || "",
+        phone: val.phone || "",
+        avatarUrl: val.avatarUrl || null,
+        avatarPath: val.avatarPath || null,
+        createdAt: val.createdAt || Date.now(),
+        updatedAt: val.updatedAt || Date.now()
+      };
     }
-  };
+    return null;
+  } catch (err) {
+    console.error("Failed to fetch profile:", err);
+    return null;
+  }
+};
 
-  const checkUsernameAvailable = async (
-    rawUsername: string,
-    currentUid?: string
-  ): Promise<boolean> => {
-    const clean = normalizeUsername(rawUsername);
-    if (!clean) return false;
-    try {
-      const snap = await get(dbRef(db, `usernames/${clean}`));
-      if (!snap.exists()) return true;
-      // If claimed by same user, it is available
-      return snap.val() === (currentUid || currentUser.value?.uid);
-    } catch (err) {
-      console.error("Error checking username availability:", err);
-      return true; // fallback
-    }
-  };
+export const checkUsernameAvailable = async (
+  rawUsername: string,
+  currentUid?: string
+): Promise<boolean> => {
+  const clean = normalizeUsername(rawUsername);
+  if (!clean) return false;
+  try {
+    const snap = await get(dbRef(db, `usernames/${clean}`));
+    if (!snap.exists()) return true;
+    return snap.val() === (currentUid || auth.currentUser?.uid || currentUser.value?.uid);
+  } catch (err) {
+    console.error("Error checking username availability:", err);
+    return true;
+  }
+};
 
+export function useAuth() {
   const saveProfile = async (data: ProfileFormData): Promise<Profile> => {
-    if (!currentUser.value) {
-      try {
-        const cred = await signInAnonymously(auth);
-        currentUser.value = cred.user;
-      } catch {
-        const fallbackUid = getFallbackUid();
-        currentUser.value = { uid: fallbackUid } as any;
-      }
+    let user = auth.currentUser || currentUser.value;
+    if (!user) {
+      user = await initializeAuthSession();
+    }
+    if (!user?.uid) {
+      throw new Error("Unable to save profile: Firebase authentication session is missing.");
     }
 
-    const uid = currentUser.value?.uid || getFallbackUid();
+    const uid = user.uid;
     const cleanUsername = normalizeUsername(data.username);
     const now = Date.now();
 
@@ -164,7 +194,6 @@ export function useAuth() {
   const getPublicProfile = async (uid: string): Promise<Omit<Profile, "phone"> | null> => {
     const p = await fetchProfile(uid);
     if (!p) return null;
-    // Phone number is strictly private and never exposed publicly!
     return {
       id: p.id,
       name: p.name,
@@ -183,7 +212,9 @@ export function useAuth() {
     authLoading,
     isAuthenticated: computed(() => !!currentUser.value),
     hasProfile: computed(() => !!currentProfile.value?.username),
-    initAuth,
+    initAuth: initializeAuthSession,
+    initializeAuthSession,
+    getAuthenticatedUser,
     fetchProfile,
     checkUsernameAvailable,
     saveProfile,

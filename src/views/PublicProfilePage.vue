@@ -131,7 +131,7 @@ import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { auth } from "../firebase";
-import { useAuth } from "../composables/useAuth";
+import { useAuth, getAuthenticatedUser } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { createOrGetConversation } from "../composables/useConversations";
 import type { Post } from "../types/post";
@@ -227,46 +227,47 @@ const handleShare = async (post: Post) => {
 };
 
 const handleMessageUser = async () => {
-  const currentUser = auth.currentUser;
-  if (!currentUser?.uid) {
-    console.error('[PublicProfile] Auth missing when attempting to message user.');
-    const toast = await toastController.create({
-      message: 'Please sign in to message this user.',
-      duration: 2500,
-      position: 'top',
-      color: 'warning'
-    });
-    await toast.present();
-    return;
-  }
-
-  if (isOwnProfile.value || uid.value === currentUser.uid) {
-    console.warn('[PublicProfile] Cannot message own profile.');
-    const toast = await toastController.create({
-      message: 'Unable to start conversation.',
-      duration: 2500,
-      position: 'top',
-      color: 'medium'
-    });
-    await toast.present();
-    return;
-  }
-
-  const targetUid = uid.value;
-  if (!targetUid || typeof targetUid !== 'string' || targetUid.trim() === '') {
-    console.error('[PublicProfile] Target profile UID missing or invalid.');
-    const toast = await toastController.create({
-      message: 'Unable to start conversation.',
-      duration: 2500,
-      position: 'top',
-      color: 'danger'
-    });
-    await toast.present();
-    return;
-  }
-
+  if (creatingChat.value) return;
   creatingChat.value = true;
   try {
+    const currentUser = await getAuthenticatedUser();
+    if (!currentUser?.uid) {
+      console.error('[PublicProfile] Auth missing when attempting to message user.');
+      const toast = await toastController.create({
+        message: 'Authentication session is still initializing. Please try again.',
+        duration: 2500,
+        position: 'top',
+        color: 'warning'
+      });
+      await toast.present();
+      return;
+    }
+
+    if (isOwnProfile.value || uid.value === currentUser.uid) {
+      console.warn('[PublicProfile] Cannot message own profile.');
+      const toast = await toastController.create({
+        message: 'Unable to start conversation.',
+        duration: 2500,
+        position: 'top',
+        color: 'medium'
+      });
+      await toast.present();
+      return;
+    }
+
+    const targetUid = uid.value;
+    if (!targetUid || typeof targetUid !== 'string' || targetUid.trim() === '') {
+      console.error('[PublicProfile] Target profile UID missing or invalid.');
+      const toast = await toastController.create({
+        message: 'Unable to start conversation.',
+        duration: 2500,
+        position: 'top',
+        color: 'danger'
+      });
+      await toast.present();
+      return;
+    }
+
     const conv = await createOrGetConversation({
       otherUserId: targetUid,
       postId: null

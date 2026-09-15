@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { auth } from '../firebase';
+import { getAuthenticatedUser } from '../composables/useAuth';
 
 let socket: Socket | null = null;
 let connectPromise: Promise<Socket> | null = null;
@@ -10,7 +11,10 @@ const SERVER_URL = import.meta.env.VITE_CHAT_SERVER_URL || 'http://localhost:300
  * Retrieve current Firebase ID token.
  */
 async function getIdToken(): Promise<string> {
-  const user = auth.currentUser;
+  let user = auth.currentUser;
+  if (!user) {
+    user = await getAuthenticatedUser();
+  }
   if (user && typeof user.getIdToken === 'function') {
     try {
       return await user.getIdToken();
@@ -19,9 +23,7 @@ async function getIdToken(): Promise<string> {
     }
   }
 
-  // Fallback for local development or device id if anonymous token is delayed
-  const fallbackUid = localStorage.getItem('laf_device_uid') || 'dev_guest';
-  return `dev_token.${btoa(JSON.stringify({ user_id: fallbackUid, sub: fallbackUid }))}.dev`;
+  return 'unauthenticated';
 }
 
 /**
