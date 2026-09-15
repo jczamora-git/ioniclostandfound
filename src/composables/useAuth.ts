@@ -284,6 +284,41 @@ export const checkUsernameAvailable = async (
   }
 };
 
+export interface SessionUser {
+  uid: string;
+  name: string;
+  username: string;
+  phone?: string;
+  email?: string;
+  isAnonymous: boolean;
+  isDevAccount: boolean;
+}
+
+export const sessionUser = computed<SessionUser | null>(() => {
+  if (currentUser.value) {
+    return {
+      uid: currentUser.value.uid,
+      name: currentProfile.value?.name || currentUser.value.displayName || "Member",
+      username: currentProfile.value?.username || "user",
+      phone: currentProfile.value?.phone || currentUser.value.phoneNumber || undefined,
+      email: currentUser.value.email || currentProfile.value?.email || undefined,
+      isAnonymous: currentUser.value.isAnonymous || false,
+      isDevAccount: !!(currentUser.value as any)?.isDevAccount
+    };
+  }
+  return null;
+});
+
+export const sessionUid = computed<string | null>(() => sessionUser.value?.uid || null);
+export const isRealFirebaseUser = computed<boolean>(() => !!auth.currentUser && !auth.currentUser.isAnonymous);
+export const isDevBypassUser = computed<boolean>(() => isDevBypassEnabled() && !!(currentUser.value as any)?.isDevAccount);
+export const hasValidSession = computed<boolean>(() => !!sessionUser.value && (!sessionUser.value.isAnonymous || sessionUser.value.isDevAccount));
+
+export async function getSessionUser(): Promise<SessionUser | null> {
+  await initializeAuthSession();
+  return sessionUser.value;
+}
+
 export function useAuth() {
   /**
    * Sign in with existing email and password.
@@ -503,6 +538,13 @@ export function useAuth() {
   return {
     currentUser,
     currentProfile,
+    sessionUser,
+    sessionUid,
+    currentSessionUser: sessionUser,
+    isSessionReady: isAuthReady,
+    isRealFirebaseUser,
+    isDevBypassUser,
+    hasValidSession,
     isAuthReady,
     authLoading,
     isAuthenticated: computed(() => !!currentUser.value && !currentUser.value.isAnonymous),
@@ -512,6 +554,7 @@ export function useAuth() {
     initAuth: initializeAuthSession,
     initializeAuthSession,
     getAuthenticatedUser,
+    getSessionUser,
     fetchProfile,
     checkUsernameAvailable,
     signIn,

@@ -9,13 +9,27 @@
         <!-- Unified Page Header -->
         <PageHeader title="Messages" />
 
+        <!-- Unauthenticated Prompt (Only when no session and no dev account) -->
+        <div v-if="!hasValidSession" class="messages-empty-state">
+          <div class="empty-icon-bubble">
+            <Lock :size="36" />
+          </div>
+          <h3 class="empty-title">Sign in to view messages</h3>
+          <p class="empty-sub">
+            Please sign in or create an account to start and view private conversations.
+          </p>
+          <button type="button" class="auth-btn" @click="router.push('/auth')">
+            Sign In
+          </button>
+        </div>
+
         <!-- Loading State -->
-        <div v-if="loading && conversations.length === 0" class="messages-loading">
+        <div v-else-if="loading && conversations.length === 0" class="messages-loading">
           <ion-spinner name="crescent" />
           <span>Loading conversations...</span>
         </div>
 
-        <!-- Empty State -->
+        <!-- Empty State (Session active, 0 conversations) -->
         <div v-else-if="conversations.length === 0" class="messages-empty-state">
           <div class="empty-icon-bubble">
             <MessageCircle :size="36" />
@@ -41,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   IonPage,
@@ -50,17 +64,29 @@ import {
   IonRefresherContent,
   IonSpinner
 } from '@ionic/vue';
-import { MessageCircle } from 'lucide-vue-next';
+import { MessageCircle, Lock } from 'lucide-vue-next';
 import PageHeader from '../components/PageHeader.vue';
 import ConversationRow from '../components/ConversationRow.vue';
 import { useConversations } from '../composables/useConversations';
+import { useAuth } from '../composables/useAuth';
 
 const router = useRouter();
+const { hasValidSession } = useAuth();
 const { conversations, loading, subscribeToConversations, stopConversationSubscription } =
   useConversations();
 
 onMounted(() => {
-  subscribeToConversations();
+  if (hasValidSession.value) {
+    subscribeToConversations();
+  }
+});
+
+watch(hasValidSession, (valid) => {
+  if (valid) {
+    subscribeToConversations();
+  } else {
+    stopConversationSubscription();
+  }
 });
 
 onUnmounted(() => {
@@ -68,7 +94,9 @@ onUnmounted(() => {
 });
 
 const handleRefresh = (event: any) => {
-  subscribeToConversations();
+  if (hasValidSession.value) {
+    subscribeToConversations();
+  }
   setTimeout(() => {
     event.target.complete();
   }, 600);
@@ -138,6 +166,18 @@ const handleSelectConversation = (convId: string) => {
   color: var(--app-text-secondary);
   max-width: 280px;
   line-height: 1.4;
+}
+
+.auth-btn {
+  margin-top: 12px;
+  padding: 10px 24px;
+  background: var(--ion-color-primary, #2F9FE8);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .conversations-list {

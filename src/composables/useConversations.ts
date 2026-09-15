@@ -1,13 +1,19 @@
 import { ref, computed } from 'vue';
 import { ref as dbRef, onValue, off, get, update } from 'firebase/database';
 import { db, auth } from '../firebase';
-import { useAuth, getAuthenticatedUser } from './useAuth';
+import { useAuth, getSessionUser, sessionUid } from './useAuth';
 import { usePosts } from './usePosts';
+import {
+  isDevChatActive,
+  getDevConversations,
+  createOrGetDevConversation
+} from '../services/devChatStorage';
 import type { Conversation, ConversationWithMeta } from '../types/conversation';
 
 const conversations = ref<ConversationWithMeta[]>([]);
 const loading = ref(false);
 let listenerActive = false;
+let devUpdateHandler: (() => void) | null = null;
 
 export interface CreateConversationOptions {
   otherUserId: string;
@@ -16,7 +22,7 @@ export interface CreateConversationOptions {
 
 /**
  * Shared helper to get or create a 1-to-1 conversation (post-based or direct user).
- * Implements strict validation, duplicate prevention, and atomic Firebase RTDB persistence.
+ * Uses real Firebase RTDB persistence when authenticated, or local dev storage during dev bypass.
  */
 export async function createOrGetConversation(
   arg1: CreateConversationOptions | string,
@@ -38,15 +44,12 @@ export async function createOrGetConversation(
     }
   }
 
-  // 1. Verify currentUser
-  let currentUser = auth.currentUser;
-  if (!currentUser?.uid) {
-    currentUser = await getAuthenticatedUser();
-  }
-  if (!currentUser?.uid) {
+  // 1. Verify currentUser session
+  const session = await getSessionUser();
+  if (!session?.uid || (session.isAnonymous && !session.isDevAccount)) {
     throw new Error('You must be signed in to send messages.');
   }
-  const currentUid = currentUser.uid;
+  const currentUid = session.uid;
 
   // 2. Verify target user
   if (!otherUserId || typeof otherUserId !== 'string' || otherUserId.trim() === '') {
@@ -54,6 +57,11 @@ export async function createOrGetConversation(
   }
   if (otherUserId === currentUid) {
     throw new Error('Cannot start a conversation with yourself.');
+  }
+
+  // If in dev bypass mode, handle via local dev storage without failing Firebase rules
+  if (isDevChatActive() || session.isDevAccount) {
+    return createOrGetDevConversation(currentUid, otherUserId, postId);
   }
 
   // 3. Verify target user exists in Firebase profiles
@@ -146,7 +154,7 @@ export const createOrGetDirectConversation = (
 ): Promise<Conversation> => createOrGetConversation({ otherUserId, postId });
 
 export function useConversations() {
-  const { currentProfile } = useAuth();
+  const { currentProfile, sessionUid, isDevBypassUser } = useAuth();
   const { getPostById } = usePosts();
 
   const totalUnreadCount = computed(() => {
@@ -163,21 +171,87 @@ export function useConversations() {
 
   const isUnread = (conv: Conversation): boolean => {
     if (!conv.lastMessageAt || !conv.lastMessageSenderId) return false;
-    // Don't mark as unread if the current user was the sender
-    if (conv.lastMessageSenderId === currentProfile.value?.id) return false;
+    const myUid = sessionUid.value || currentProfile.value?.id;
+    if (conv.lastMessageSenderId === myUid) return false;
 
     const lastRead = Number(localStorage.getItem(`laf_read_${conv.id}`) || 0);
     return conv.lastMessageAt > lastRead;
   };
 
   const subscribeToConversations = () => {
-    const uid = currentProfile.value?.id;
+    const uid = sessionUid.value || currentProfile.value?.id;
     if (!uid) return;
 
     if (listenerActive) return;
     listenerActive = true;
     loading.value = true;
 
+    // DEV BYPASS MODE: Read local dev conversations
+    if (isDevChatActive() || isDevBypassUser.value) {
+      const loadDevConvs = async () => {
+        const rawList = getDevConversations();
+        const loaded: ConversationWithMeta[] = [];
+
+        for (const rawConv of rawList) {
+          const otherUid = (rawConv.participantIds || []).find((id) => id !== uid);
+          let otherProfile = null;
+
+          if (otherUid) {
+            try {
+              const pSnap = await get(dbRef(db, `profiles/${otherUid}`));
+              if (pSnap.exists()) {
+                const val = pSnap.val();
+                otherProfile = {
+                  id: otherUid,
+                  name: val.name || 'Community Member',
+                  username: val.username || 'user',
+                  phone: '',
+                  avatarUrl: val.avatarUrl || null,
+                  createdAt: val.createdAt || 0,
+                  updatedAt: val.updatedAt || 0
+                };
+              }
+            } catch {}
+
+            if (!otherProfile) {
+              otherProfile = {
+                id: otherUid,
+                name: 'Community Member',
+                username: 'member',
+                phone: '',
+                avatarUrl: null,
+                createdAt: 0,
+                updatedAt: 0
+              };
+            }
+          }
+
+          let post = null;
+          if (rawConv.postId) {
+            post = await getPostById(rawConv.postId);
+          }
+
+          loaded.push({
+            ...rawConv,
+            otherParticipant: otherProfile,
+            post,
+            unread: isUnread(rawConv)
+          });
+        }
+
+        loaded.sort((a, b) => (b.lastMessageAt || b.updatedAt) - (a.lastMessageAt || a.updatedAt));
+        conversations.value = loaded;
+        loading.value = false;
+      };
+
+      loadDevConvs();
+      devUpdateHandler = loadDevConvs;
+      window.addEventListener('laf:dev-conversations-updated', devUpdateHandler);
+      window.addEventListener('laf:dev-message-new', devUpdateHandler);
+      return;
+    }
+
+    // REAL FIREBASE RTDB MODE
     const userConvsRef = dbRef(db, `userConversations/${uid}`);
     onValue(userConvsRef, async (snapshot) => {
       if (!snapshot.exists()) {
@@ -239,12 +313,17 @@ export function useConversations() {
   };
 
   const stopConversationSubscription = () => {
-    const uid = currentProfile.value?.id;
-    if (uid) {
+    if (devUpdateHandler) {
+      window.removeEventListener('laf:dev-conversations-updated', devUpdateHandler);
+      window.removeEventListener('laf:dev-message-new', devUpdateHandler);
+      devUpdateHandler = null;
+    }
+    const uid = sessionUid.value || currentProfile.value?.id;
+    if (uid && !isDevChatActive()) {
       const userConvsRef = dbRef(db, `userConversations/${uid}`);
       off(userConvsRef);
-      listenerActive = false;
     }
+    listenerActive = false;
   };
 
   return {

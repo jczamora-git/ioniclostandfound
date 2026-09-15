@@ -56,7 +56,7 @@
               v-for="msg in messages"
               :key="msg.id"
               :message="msg"
-              :is-own="msg.senderId === currentProfile?.id"
+              :is-own="msg.senderId === (sessionUid || currentProfile?.id)"
             />
           </template>
 
@@ -96,7 +96,8 @@ import ChatComposer from '../components/ChatComposer.vue';
 import PostChatContext from '../components/PostChatContext.vue';
 import { useChat } from '../composables/useChat';
 import { useConversations } from '../composables/useConversations';
-import { useAuth, getAuthenticatedUser } from '../composables/useAuth';
+import { useAuth, getSessionUser, sessionUid } from '../composables/useAuth';
+import { isDevChatActive, getDevConversationById } from '../services/devChatStorage';
 import { usePosts } from '../composables/usePosts';
 import { ref as dbRef, get } from 'firebase/database';
 import { db, auth } from '../firebase';
@@ -160,33 +161,52 @@ onMounted(async () => {
 
   // Fetch conversation metadata
   try {
-    const snap = await get(dbRef(db, `conversations/${conversationId.value}`));
-    if (snap.exists()) {
-      const convData = snap.val();
+    let convData = null;
+    if (isDevChatActive()) {
+      convData = getDevConversationById(conversationId.value);
+    }
+    if (!convData) {
+      const snap = await get(dbRef(db, `conversations/${conversationId.value}`));
+      if (snap.exists()) {
+        convData = snap.val();
+      }
+    }
+
+    if (convData) {
       if (convData.postId) {
         post.value = await getPostById(convData.postId);
       }
 
-      let myUid = auth.currentUser?.uid || currentProfile.value?.id;
-      if (!myUid) {
-        const u = await getAuthenticatedUser();
-        myUid = u?.uid || currentProfile.value?.id;
-      }
+      const myUid = sessionUid.value || currentProfile.value?.id;
       const otherUid = (convData.participantIds || []).find(
         (id: string) => id !== myUid
       );
       if (otherUid) {
-        const pSnap = await get(dbRef(db, `profiles/${otherUid}`));
-        if (pSnap.exists()) {
-          const pVal = pSnap.val();
+        try {
+          const pSnap = await get(dbRef(db, `profiles/${otherUid}`));
+          if (pSnap.exists()) {
+            const pVal = pSnap.val();
+            otherParticipant.value = {
+              id: otherUid,
+              name: pVal.name || 'Community Member',
+              username: pVal.username || 'user',
+              phone: '',
+              avatarUrl: pVal.avatarUrl || null,
+              createdAt: pVal.createdAt || 0,
+              updatedAt: pVal.updatedAt || 0
+            };
+          }
+        } catch {}
+
+        if (!otherParticipant.value) {
           otherParticipant.value = {
             id: otherUid,
-            name: pVal.name || 'Community Member',
-            username: pVal.username || 'user',
+            name: 'Community Member',
+            username: 'member',
             phone: '',
-            avatarUrl: pVal.avatarUrl || null,
-            createdAt: pVal.createdAt || 0,
-            updatedAt: pVal.updatedAt || 0
+            avatarUrl: null,
+            createdAt: 0,
+            updatedAt: 0
           };
         }
       }

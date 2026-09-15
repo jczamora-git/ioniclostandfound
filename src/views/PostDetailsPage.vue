@@ -226,7 +226,7 @@ import StatusBadge from "../components/StatusBadge.vue";
 import CommentList from "../components/CommentList.vue";
 import CommentComposer from "../components/CommentComposer.vue";
 import { auth } from "../firebase";
-import { useAuth, getAuthenticatedUser } from "../composables/useAuth";
+import { useAuth, getSessionUser, sessionUid } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useComments } from "../composables/useComments";
 import { createOrGetConversation } from "../composables/useConversations";
@@ -251,7 +251,7 @@ const showGeneralActionSheet = ref(false);
 const showDeleteAlert = ref(false);
 
 const isOwner = computed(() => {
-  const currentUid = auth.currentUser?.uid || currentProfile.value?.id;
+  const currentUid = sessionUid.value || auth.currentUser?.uid || currentProfile.value?.id;
   if (!post.value || !currentUid) return false;
   return post.value.authorId === currentUid;
 });
@@ -268,8 +268,8 @@ const handleMessagePoster = async () => {
   if (!post.value || creatingChat.value) return;
   creatingChat.value = true;
   try {
-    const currentUser = await getAuthenticatedUser();
-    if (!currentUser?.uid || currentUser.isAnonymous) {
+    const session = await getSessionUser();
+    if (!session?.uid || (session.isAnonymous && !session.isDevAccount)) {
       console.warn("[PostDetails] Unauthenticated user, redirecting to Sign In.");
       const toast = await toastController.create({
         message: "Please sign in or create an account to message the poster.",
@@ -282,7 +282,7 @@ const handleMessagePoster = async () => {
       return;
     }
 
-    if (isOwner.value || post.value.authorId === currentUser.uid) {
+    if (isOwner.value || post.value.authorId === session.uid) {
       console.warn("[PostDetails] Cannot message on own post.");
       const toast = await toastController.create({
         message: "Unable to start conversation.",

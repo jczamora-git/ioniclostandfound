@@ -131,7 +131,7 @@ import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { auth } from "../firebase";
-import { useAuth, getAuthenticatedUser } from "../composables/useAuth";
+import { useAuth, getSessionUser, sessionUid } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { createOrGetConversation } from "../composables/useConversations";
 import type { Post } from "../types/post";
@@ -149,7 +149,7 @@ const creatingChat = ref(false);
 const activeTab = ref<"Posts" | "Lost" | "Found">("Posts");
 
 const isOwnProfile = computed(() => {
-  const currentUid = auth.currentUser?.uid || currentProfile.value?.id;
+  const currentUid = sessionUid.value || auth.currentUser?.uid || currentProfile.value?.id;
   if (!currentUid || !uid.value) return false;
   return currentUid === uid.value;
 });
@@ -230,8 +230,8 @@ const handleMessageUser = async () => {
   if (creatingChat.value) return;
   creatingChat.value = true;
   try {
-    const currentUser = await getAuthenticatedUser();
-    if (!currentUser?.uid || currentUser.isAnonymous) {
+    const session = await getSessionUser();
+    if (!session?.uid || (session.isAnonymous && !session.isDevAccount)) {
       console.warn('[PublicProfile] Unauthenticated user, redirecting to Sign In.');
       const toast = await toastController.create({
         message: 'Please sign in or create an account to message this member.',
@@ -244,7 +244,7 @@ const handleMessageUser = async () => {
       return;
     }
 
-    if (isOwnProfile.value || uid.value === currentUser.uid) {
+    if (isOwnProfile.value || uid.value === session.uid) {
       console.warn('[PublicProfile] Cannot message own profile.');
       const toast = await toastController.create({
         message: 'Unable to start conversation.',
