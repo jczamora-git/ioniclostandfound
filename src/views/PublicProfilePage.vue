@@ -86,8 +86,8 @@
 
           <!-- Achievements Section -->
           <AchievementsSection
-            v-if="uid"
-            :user-id="uid"
+            v-if="targetProfileId"
+            :user-id="targetProfileId"
             :is-own-profile="isOwnProfile"
           />
 
@@ -147,6 +147,7 @@ import {
   IonContent,
   IonPage,
   IonSpinner,
+  onIonViewWillEnter,
   toastController
 } from "@ionic/vue";
 import {
@@ -164,6 +165,7 @@ import { auth } from "../firebase";
 import { useAuth, getSessionUser, currentAppUserId } from "../composables/useAuth";
 import { useProfiles, loadProfile } from "../composables/useProfiles";
 import { usePosts } from "../composables/usePosts";
+import { useAchievements } from "../composables/useAchievements";
 import { createOrGetConversation } from "../composables/useConversations";
 import type { Post } from "../types/post";
 import type { Profile } from "../types/profile";
@@ -172,8 +174,10 @@ const route = useRoute();
 const router = useRouter();
 const { currentProfile } = useAuth();
 const { posts, toggleHelpful, isHelpfulByMe } = usePosts();
+const { loadAchievementsForUser } = useAchievements();
 
-const uid = computed(() => (route.params.uid || (route.params as any).userId) as string);
+const targetProfileId = computed(() => (((route.params as any).userId || route.params.uid) as string || "").trim());
+const uid = targetProfileId;
 const profile = ref<Profile | null>(null);
 const loading = ref(true);
 const creatingChat = ref(false);
@@ -181,8 +185,14 @@ const activeTab = ref<"Posts" | "Lost" | "Found">("Posts");
 
 const isOwnProfile = computed(() => {
   const currentId = currentAppUserId.value || currentProfile.value?.id;
-  if (!currentId || !uid.value) return false;
-  return currentId === uid.value;
+  if (!currentId || !targetProfileId.value) return false;
+  return currentId === targetProfileId.value;
+});
+
+onIonViewWillEnter(() => {
+  if (targetProfileId.value) {
+    loadAchievementsForUser(targetProfileId.value, true);
+  }
 });
 
 interface ProfileTabItem {

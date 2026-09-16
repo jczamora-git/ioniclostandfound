@@ -134,6 +134,9 @@ export function usePosts() {
                 : "open") as PostStatus,
               helpfulCount: typeof item.helpfulCount === "number" ? item.helpfulCount : 0,
               commentsCount: typeof item.commentsCount === "number" ? item.commentsCount : 0,
+              resolvedAt: typeof item.resolvedAt === "number" ? item.resolvedAt : undefined,
+              resolvedBy: item.resolvedBy || undefined,
+              meritRecipientId: item.meritRecipientId || null,
               createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
               updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now()
             });
@@ -410,6 +413,9 @@ export function usePosts() {
             : "open") as PostStatus,
           helpfulCount: typeof item.helpfulCount === "number" ? item.helpfulCount : 0,
           commentsCount: typeof item.commentsCount === "number" ? item.commentsCount : 0,
+          resolvedAt: typeof item.resolvedAt === "number" ? item.resolvedAt : undefined,
+          resolvedBy: item.resolvedBy || undefined,
+          meritRecipientId: item.meritRecipientId || null,
           createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
           updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now()
         };

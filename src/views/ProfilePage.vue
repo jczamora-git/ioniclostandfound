@@ -95,8 +95,9 @@
 
         <!-- Achievements Section -->
         <AchievementsSection
-          v-if="currentProfile?.id"
-          :user-id="currentProfile.id"
+          v-if="targetProfileId"
+          :user-id="targetProfileId"
+          :is-own-profile="true"
         />
 
         <!-- My Posts Section Header & Filter Pills -->
@@ -167,6 +168,7 @@ import { useRouter } from "vue-router";
 import {
   IonContent,
   IonPage,
+  onIonViewWillEnter,
   actionSheetController,
   toastController
 } from "@ionic/vue";
@@ -186,15 +188,25 @@ import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
 import PostComposerModal from "../components/PostComposerModal.vue";
 import AchievementsSection from "../components/AchievementsSection.vue";
-import { useAuth } from "../composables/useAuth";
+import { useAuth, currentAppUserId } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useTheme } from "../composables/useTheme";
+import { useAchievements } from "../composables/useAchievements";
 import type { Post, PostFormData } from "../types/post";
 
 const router = useRouter();
 const { currentProfile, signOutUser } = useAuth();
 const { posts, toggleHelpful, isHelpfulByMe, createPost } = usePosts();
 const { themePreference, setTheme } = useTheme();
+const { loadAchievementsForUser } = useAchievements();
+
+const targetProfileId = computed(() => (currentAppUserId.value || currentProfile.value?.id || "").trim());
+
+onIonViewWillEnter(() => {
+  if (targetProfileId.value) {
+    loadAchievementsForUser(targetProfileId.value, true);
+  }
+});
 
 const cycleTheme = () => {
   if (themePreference.value === "light") {

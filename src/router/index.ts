@@ -57,7 +57,8 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import('../views/PostDetailsPage.vue')
   },
   {
-    path: '/profile/:uid',
+    path: '/profile/:userId',
+    alias: ['/profile/:uid'],
     name: 'PublicProfile',
     component: () => import('../views/PublicProfilePage.vue')
   },

@@ -18,7 +18,7 @@
     "posts": {
       ".read": true,
       ".write": "auth != null",
-      ".indexOn": ["createdAt", "updatedAt", "authorId", "status", "category", "type", "subCategory"]
+      ".indexOn": ["createdAt", "updatedAt", "authorId", "status", "category", "type", "subCategory", "meritRecipientId"]
     },
     "subcategories": {
       ".read": true,

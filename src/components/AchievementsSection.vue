@@ -3,13 +3,22 @@
     <!-- Header -->
     <div class="achievements-header">
       <h2 class="section-title">Achievements</h2>
-      <span v-if="meritCount > 0" class="merits-count-badge">
+      <span v-if="!isAchievementsLoading && meritCount > 0" class="merits-count-badge">
         {{ meritCount }} {{ meritCount === 1 ? 'Merit' : 'Merits' }}
       </span>
     </div>
 
-    <!-- Compact Empty State -->
-    <div v-if="meritCount === 0" class="achievements-empty-row">
+    <!-- Loading Skeleton State (Requirement 17: Never flash empty state while loading) -->
+    <div v-if="isAchievementsLoading" class="achievements-loading-row">
+      <ion-skeleton-text :animated="true" class="skeleton-icon-bubble" />
+      <div class="skeleton-text-wrap">
+        <ion-skeleton-text :animated="true" class="skeleton-title" />
+        <ion-skeleton-text :animated="true" class="skeleton-desc" />
+      </div>
+    </div>
+
+    <!-- Compact Empty State (Shown ONLY when fetch completes and meritCount === 0) -->
+    <div v-else-if="meritCount === 0" class="achievements-empty-row">
       <div class="empty-icon-bubble">
         <Medal :size="20" />
       </div>
@@ -21,7 +30,7 @@
       </div>
     </div>
 
-    <!-- Active Achievements Display -->
+    <!-- Active Achievements Display (When meritCount > 0) -->
     <div v-else class="achievements-content">
       <!-- Highest Unlocked Rank Card -->
       <div v-if="highestTier" class="highest-rank-card">
@@ -39,17 +48,16 @@
         </div>
       </div>
 
-      <!-- Badge Chips Row -->
-      <div class="badge-chips-row">
+      <!-- Badge Chips Row: Unlocked tiers clearly distinguished -->
+      <div v-if="unlockedBadges.length > 0" class="badge-chips-row">
         <div
-          v-for="badge in userBadges"
+          v-for="badge in unlockedBadges"
           :key="badge.tier.id"
-          class="badge-chip"
-          :class="{ unlocked: badge.unlocked }"
+          class="badge-chip unlocked"
         >
           <component :is="getTierIcon(badge.tier.iconName)" :size="13" class="chip-icon" />
           <span class="chip-label">{{ badge.tier.name }}</span>
-          <span v-if="badge.unlocked" class="chip-check">✓</span>
+          <span class="chip-check">✓</span>
         </div>
       </div>
     </div>
@@ -57,28 +65,49 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, watch } from 'vue';
+import { IonSkeletonText } from '@ionic/vue';
 import { Medal, Award, BadgeCheck, Trophy } from 'lucide-vue-next';
 import { useAchievements } from '../composables/useAchievements';
 
 const props = defineProps<{
   userId: string;
+  isOwnProfile?: boolean;
 }>();
 
 const {
-  subscribeToAchievements,
+  loadAchievementsForUser,
+  isUserAchievementsLoading,
   getMeritCount,
   getUserBadges,
   getHighestTier
 } = useAchievements();
 
-onMounted(() => {
-  subscribeToAchievements();
-});
-
 const meritCount = computed(() => getMeritCount(props.userId));
 const userBadges = computed(() => getUserBadges(props.userId));
+const unlockedBadges = computed(() => userBadges.value.filter((b) => b.unlocked));
 const highestTier = computed(() => getHighestTier(props.userId));
+const isAchievementsLoading = computed(() => isUserAchievementsLoading(props.userId));
+
+const refresh = () => {
+  if (props.userId) {
+    loadAchievementsForUser(props.userId);
+  }
+};
+
+onMounted(() => {
+  refresh();
+});
+
+watch(
+  () => props.userId,
+  (newId) => {
+    if (newId) {
+      loadAchievementsForUser(newId);
+    }
+  },
+  { immediate: true }
+);
 
 const getTierIcon = (iconName: string) => {
   switch (iconName) {
@@ -124,6 +153,43 @@ const getTierIcon = (iconName: string) => {
   background: var(--app-primary-soft, rgba(47, 159, 232, 0.12));
   padding: 2px 8px;
   border-radius: 10px;
+}
+
+/* Loading Skeleton State */
+.achievements-loading-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--app-surface-secondary);
+  border: 1px solid var(--app-card-border);
+  border-radius: 14px;
+}
+
+.skeleton-icon-bubble {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.skeleton-text-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.skeleton-title {
+  width: 45%;
+  height: 14px;
+  border-radius: 4px;
+}
+
+.skeleton-desc {
+  width: 75%;
+  height: 11px;
+  border-radius: 4px;
 }
 
 /* Compact Empty Row */
