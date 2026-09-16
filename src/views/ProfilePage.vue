@@ -30,7 +30,10 @@
             </div>
 
             <div class="hero-identity">
-              <h1 class="hero-name">{{ currentProfile?.name || 'Community Member' }}</h1>
+              <div class="hero-name-row">
+                <h1 class="hero-name">{{ currentProfile?.name || 'Community Member' }}</h1>
+                <AchievementBadge :user-id="targetProfileId" :size="16" />
+              </div>
               <span class="hero-username">@{{ currentProfile?.username || 'user' }}</span>
             </div>
 
@@ -188,6 +191,7 @@ import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
 import PostComposerModal from "../components/PostComposerModal.vue";
 import AchievementsSection from "../components/AchievementsSection.vue";
+import AchievementBadge from "../components/AchievementBadge.vue";
 import { useAuth, currentAppUserId } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useTheme } from "../composables/useTheme";
@@ -394,6 +398,13 @@ const handleCreate = async (data: PostFormData) => {
   align-items: center;
   gap: 2px;
   margin-top: -2px;
+}
+
+.hero-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .hero-name {

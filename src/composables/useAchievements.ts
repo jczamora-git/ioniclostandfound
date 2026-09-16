@@ -2,7 +2,7 @@ import { ref, computed, type Ref, type ComputedRef } from 'vue';
 import { ref as dbRef, get, set, update, query, orderByChild, equalTo } from 'firebase/database';
 import { db, auth } from '../firebase';
 import { useAuth, currentAppUserId, sessionUid } from './useAuth';
-import { resolveAppUserId } from './useProfiles';
+import { resolveAppUserId, getProfileById } from './useProfiles';
 import { useNotifications } from './useNotifications';
 import {
   MERIT_TIERS,
@@ -18,6 +18,9 @@ const loadingByUserId = ref<Record<string, boolean>>({});
 const inFlightRequests = new Map<string, Promise<Achievement[]>>();
 const postAchievementsMap = new Map<string, Achievement>();
 
+let hasLoadedGlobalAchievements = false;
+let globalAchievementsPromise: Promise<void> | null = null;
+
 /**
  * Checks if two user IDs refer to the same application user.
  * Handles dev prefixes (e.g. dev_user1 === user1) and whitespace.
@@ -31,6 +34,76 @@ export function isSameAppUser(idA?: string | null, idB?: string | null): boolean
   if (a.replace(/^dev_/, '') === b.replace(/^dev_/, '')) return true;
   return false;
 }
+
+/**
+ * Global batch loader that fetches all achievements once and caches them by recipient ID.
+ * Avoids N+1 calls across feeds, message lists, and comments.
+ */
+export const loadAllAchievements = async (forceRefresh = false): Promise<void> => {
+  if (hasLoadedGlobalAchievements && !forceRefresh) return;
+  if (globalAchievementsPromise && !forceRefresh) return globalAchievementsPromise;
+
+  globalAchievementsPromise = (async () => {
+    try {
+      const snap = await get(dbRef(db, 'achievements'));
+      const grouped: Record<string, Achievement[]> = {};
+
+      if (snap.exists()) {
+        const val = snap.val() as Record<string, any>;
+        for (const [id, item] of Object.entries(val)) {
+          if (item && item.type === 'community_merit') {
+            const ach: Achievement = {
+              id,
+              type: 'community_merit',
+              postId: item.postId || '',
+              recipientId: item.recipientId || '',
+              awardedBy: item.awardedBy || '',
+              createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now()
+            };
+            if (ach.postId) {
+              postAchievementsMap.set(ach.postId, ach);
+            }
+            if (ach.recipientId) {
+              const rId = ach.recipientId.trim();
+              if (!grouped[rId]) grouped[rId] = [];
+              grouped[rId].push(ach);
+            }
+          }
+        }
+      }
+
+      // Deduplicate each recipient's achievements by postId
+      const finalGrouped: Record<string, Achievement[]> = {};
+      for (const [rId, list] of Object.entries(grouped)) {
+        const seenPosts = new Set<string>();
+        const unique: Achievement[] = [];
+        for (const ach of list) {
+          if (ach.postId) {
+            if (seenPosts.has(ach.postId)) continue;
+            seenPosts.add(ach.postId);
+          }
+          unique.push(ach);
+        }
+        unique.sort((a, b) => b.createdAt - a.createdAt);
+        finalGrouped[rId] = unique;
+      }
+
+      achievementsByUserId.value = {
+        ...achievementsByUserId.value,
+        ...finalGrouped
+      };
+      hasLoadedGlobalAchievements = true;
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        console.warn('[useAchievements] Failed loading all achievements:', err);
+      }
+    } finally {
+      globalAchievementsPromise = null;
+    }
+  })();
+
+  return globalAchievementsPromise;
+};
 
 /**
  * Fetch and reconcile achievements for a canonical user/profile ID.
@@ -61,6 +134,7 @@ export const loadAchievementsForUser = async (
     try {
       const userMerits: Achievement[] = [];
       const existingPostIds = new Set<string>();
+      const groupedBatch: Record<string, Achievement[]> = {};
 
       // 1. Direct Firebase Read of all achievements
       try {
@@ -81,6 +155,12 @@ export const loadAchievementsForUser = async (
               if (ach.postId) {
                 postAchievementsMap.set(ach.postId, ach);
                 existingPostIds.add(ach.postId);
+              }
+
+              if (ach.recipientId) {
+                const rId = ach.recipientId.trim();
+                if (!groupedBatch[rId]) groupedBatch[rId] = [];
+                groupedBatch[rId].push(ach);
               }
 
               // Check if recipient matches target profile ID or legacy alias
@@ -204,16 +284,60 @@ export const loadAchievementsForUser = async (
   return fetchPromise;
 };
 
+export interface UserDisplayModel {
+  id: string;
+  name: string;
+  username: string;
+  avatarUrl: string | null;
+  meritCount: number;
+  highestAchievement: MeritTier | null;
+}
+
 /**
- * Get merit achievements for a specific user ID.
+ * Get unified cached user display model including profile and achievement rank.
+ */
+export const getUserDisplayModel = (uid: string | null | undefined): UserDisplayModel | null => {
+  if (!uid) return null;
+  const p = getProfileById(uid);
+  return {
+    id: uid,
+    name: p?.name || 'Community Member',
+    username: p?.username || 'user',
+    avatarUrl: p?.avatarUrl || null,
+    meritCount: getMeritCount(uid),
+    highestAchievement: getHighestTier(uid)
+  };
+};
+
+/**
+ * Get merit achievements for a specific user ID with alias matching and global caching.
  */
 export const getMeritAchievements = (userId: string | null | undefined): Achievement[] => {
   if (!userId) return [];
   const targetId = userId.trim();
-  if (!achievementsByUserId.value[targetId] && !inFlightRequests.has(targetId)) {
+
+  // Trigger global achievements load if not yet initialized
+  if (!hasLoadedGlobalAchievements && !globalAchievementsPromise) {
+    loadAllAchievements();
+  }
+
+  // Exact targetId match
+  if (achievementsByUserId.value[targetId]) {
+    return achievementsByUserId.value[targetId];
+  }
+
+  // Matching aliases in cache
+  for (const [uid, list] of Object.entries(achievementsByUserId.value)) {
+    if (isSameAppUser(uid, targetId)) {
+      return list;
+    }
+  }
+
+  if (!inFlightRequests.has(targetId) && !hasLoadedGlobalAchievements) {
     loadAchievementsForUser(targetId);
   }
-  return achievementsByUserId.value[targetId] || [];
+
+  return [];
 };
 
 /**
@@ -397,6 +521,8 @@ export function useAchievements(
     getUserBadges,
     getHighestTier,
     getAchievementByPostId,
+    loadAllAchievements,
+    getUserDisplayModel,
     awardMeritAndResolvePost
   };
 }

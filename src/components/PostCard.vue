@@ -12,6 +12,7 @@
         <div class="author-meta">
           <div class="author-name-row">
             <span class="author-name">{{ authorName }}</span>
+            <AchievementBadge :user-id="post.authorId" />
             <span class="author-dot">·</span>
             <time class="relative-time">{{ relativeTime }}</time>
           </div>
@@ -154,6 +155,7 @@ import {
 import UserAvatar from "./UserAvatar.vue";
 import StatusBadge from "./StatusBadge.vue";
 import ShareModal from "./ShareModal.vue";
+import AchievementBadge from "./AchievementBadge.vue";
 import { hasValidDescription, type Post } from "../types/post";
 import { useLatestComment } from "../composables/useLatestComment";
 import { useProfiles, getProfileById, loadProfile } from "../composables/useProfiles";

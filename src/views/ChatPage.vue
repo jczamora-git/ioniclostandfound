@@ -164,6 +164,7 @@
                     <div class="reply-content-col">
                       <div class="reply-header-line">
                         <span class="reply-sender-name">{{ resolveSender(msg.senderId).name }}</span>
+                        <AchievementBadge :user-id="msg.senderId" :size="13" />
                         <span class="reply-timestamp">{{ formatMessageTime(msg.createdAt) }}</span>
                       </div>
 
@@ -279,6 +280,7 @@ import UserAvatar from '../components/UserAvatar.vue';
 import MessageBubble from '../components/MessageBubble.vue';
 import ChatComposer, { type ReplyContext } from '../components/ChatComposer.vue';
 import UploadDebugBanner from '../components/UploadDebugBanner.vue';
+import AchievementBadge from '../components/AchievementBadge.vue';
 import { useChat } from '../composables/useChat';
 import { useConversations } from '../composables/useConversations';
 import { useAuth, currentAppUserId, sessionUid } from '../composables/useAuth';
@@ -1004,7 +1006,7 @@ const handleOpenProfile = () => {
 
 .reply-header-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   margin-bottom: 2px;
 }

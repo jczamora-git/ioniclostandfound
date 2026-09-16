@@ -48,7 +48,10 @@
               size="md"
             />
             <div class="author-meta">
-              <span class="author-name">{{ authorName }}</span>
+              <div class="author-name-row">
+                <span class="author-name">{{ authorName }}</span>
+                <AchievementBadge :user-id="post.authorId" />
+              </div>
               <span class="author-sub">{{ relativeTime }}</span>
             </div>
           </div>
@@ -130,7 +133,10 @@
                 size="sm"
               />
               <div class="merit-helper-meta">
-                <span class="helper-name-text">{{ creditedHelper.name }}</span>
+                <div class="helper-name-row">
+                  <span class="helper-name-text">{{ creditedHelper.name }}</span>
+                  <AchievementBadge :user-id="creditedHelper.id" />
+                </div>
                 <span class="helper-handle-text">@{{ creditedHelper.username }}</span>
               </div>
               <button type="button" class="view-helper-btn" @click.stop="goToHelperProfile">
@@ -301,6 +307,7 @@ import CommentList from "../components/CommentList.vue";
 import CommentComposer, { type ReplyTarget } from "../components/CommentComposer.vue";
 import ResolvePostModal from "../components/ResolvePostModal.vue";
 import ShareModal from "../components/ShareModal.vue";
+import AchievementBadge from "../components/AchievementBadge.vue";
 import { useAuth, getSessionUser, currentAppUserId } from "../composables/useAuth";
 import { usePosts } from "../composables/usePosts";
 import { useComments } from "../composables/useComments";
@@ -852,6 +859,13 @@ const deleteAlertButtons = [
   flex-direction: column;
   min-width: 0;
   gap: 1px;
+}
+
+.author-name-row,
+.helper-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .author-name {

@@ -40,7 +40,10 @@
               </div>
 
               <div class="hero-identity">
-                <h1 class="hero-name">{{ profile?.name || authorNameFallback }}</h1>
+                <div class="hero-name-row">
+                  <h1 class="hero-name">{{ profile?.name || authorNameFallback }}</h1>
+                  <AchievementBadge :user-id="targetProfileId" :size="16" />
+                </div>
                 <span class="hero-username">@{{ profile?.username || authorUsernameFallback }}</span>
               </div>
 
@@ -161,6 +164,7 @@ import UserAvatar from "../components/UserAvatar.vue";
 import PostCard from "../components/PostCard.vue";
 import PageHeader from "../components/PageHeader.vue";
 import AchievementsSection from "../components/AchievementsSection.vue";
+import AchievementBadge from "../components/AchievementBadge.vue";
 import { auth } from "../firebase";
 import { useAuth, getSessionUser, currentAppUserId } from "../composables/useAuth";
 import { useProfiles, loadProfile } from "../composables/useProfiles";
@@ -407,6 +411,13 @@ const handleMessageUser = async () => {
   align-items: center;
   gap: 2px;
   margin-top: -2px;
+}
+
+.hero-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .hero-name {

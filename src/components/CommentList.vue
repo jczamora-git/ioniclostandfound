@@ -45,6 +45,7 @@
               <span class="author-name" @click="handleAuthorClick(thread.root.authorId)">
                 {{ getCommentAuthorName(thread.root) }}
               </span>
+              <AchievementBadge :user-id="thread.root.authorId" :size="13" />
               <span class="author-handle">@{{ getCommentAuthorUsername(thread.root) }}</span>
               <span class="comment-dot">·</span>
               <span class="comment-time">{{ formatTime(thread.root.createdAt) }}</span>
@@ -104,6 +105,7 @@
                 <span class="author-name" @click="handleAuthorClick(reply.authorId)">
                   {{ getCommentAuthorName(reply) }}
                 </span>
+                <AchievementBadge :user-id="reply.authorId" :size="12" />
                 <span class="author-handle">@{{ getCommentAuthorUsername(reply) }}</span>
                 <span class="comment-dot">·</span>
                 <span class="comment-time">{{ formatTime(reply.createdAt) }}</span>
@@ -147,6 +149,7 @@ import { useRouter } from "vue-router";
 import { IonSpinner } from "@ionic/vue";
 import { Trash2, Reply } from "lucide-vue-next";
 import UserAvatar from "./UserAvatar.vue";
+import AchievementBadge from "./AchievementBadge.vue";
 import { useProfiles } from "../composables/useProfiles";
 import type { PostComment } from "../types/comment";
 import type { ReplyTarget } from "./CommentComposer.vue";

@@ -18,7 +18,10 @@
     <!-- Details -->
     <div class="row-main">
       <div class="row-top-line">
-        <span class="user-name">{{ conversation.otherParticipant?.name || 'Community Member' }}</span>
+        <div class="name-with-badge">
+          <span class="user-name">{{ conversation.otherParticipant?.name || 'Community Member' }}</span>
+          <AchievementBadge :user-id="conversation.otherParticipant?.id" :size="13" />
+        </div>
         <div class="row-meta-right">
           <span v-if="unreadCount > 0" class="row-unread-count-badge">
             {{ unreadCount > 99 ? '99+' : unreadCount }}
@@ -38,6 +41,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import UserAvatar from './UserAvatar.vue';
+import AchievementBadge from './AchievementBadge.vue';
 import { sessionUid } from '../composables/useAuth';
 import type { ConversationWithMeta } from '../types/conversation';
 
@@ -140,6 +144,14 @@ const postThreadTitle = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.name-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .user-name {
