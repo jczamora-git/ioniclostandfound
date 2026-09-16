@@ -108,7 +108,6 @@
               <span>Remove</span>
             </button>
           </div>
-          <span class="photo-disabled-hint">Photo upload is not available yet.</span>
         </div>
 
         <div v-else class="photo-add-section">
@@ -124,6 +123,9 @@
         </div>
 
         <span v-if="photoError" class="field-error-text">{{ photoError }}</span>
+
+        <!-- Temporary Android Upload Diagnostics (Shown only on failure) -->
+        <UploadDebugBanner />
 
         <input
           ref="fileInputRef"
@@ -192,6 +194,7 @@ import {
 import UserAvatar from "./UserAvatar.vue";
 import PostCategoryFields from "./PostCategoryFields.vue";
 import CustomDatePicker from "./CustomDatePicker.vue";
+import UploadDebugBanner from "./UploadDebugBanner.vue";
 import { useAuth } from "../composables/useAuth";
 import { validateImageFile } from "../utils/fileValidation";
 import {

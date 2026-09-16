@@ -101,6 +101,9 @@
           <span>{{ globalError }}</span>
         </div>
 
+        <!-- Temporary Android Upload Diagnostics (Shown only on failure) -->
+        <UploadDebugBanner />
+
         <!-- Full-Width Save Changes Button Inside Content -->
         <button
           type="button"
@@ -128,6 +131,7 @@ import {
 import { AlertCircle, Camera, Trash2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import UserAvatar from "../components/UserAvatar.vue";
+import UploadDebugBanner from "../components/UploadDebugBanner.vue";
 import { normalizeUsername, useAuth } from "../composables/useAuth";
 import { useImageUpload, validateImageFile, MAX_AVATAR_SIZE_BYTES } from "../composables/useImageUpload";
 import type { ProfileFormData } from "../types/profile";

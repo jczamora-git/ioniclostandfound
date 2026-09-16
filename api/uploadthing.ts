@@ -95,22 +95,47 @@ const ALLOWED_ORIGINS = [
   'https://ioniclostandfound.vercel.app',
   'capacitor://localhost',
   'http://localhost',
-  'https://localhost'
+  'https://localhost',
+  'ionic://localhost'
 ];
 
+function isOriginAllowed(origin: string): boolean {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (
+    origin.startsWith('http://localhost') ||
+    origin.startsWith('https://localhost') ||
+    origin.startsWith('capacitor://') ||
+    origin.startsWith('ionic://') ||
+    origin.endsWith('.vercel.app')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
-  const origin = (req.headers.origin as string) || '';
-  if (origin && (ALLOWED_ORIGINS.includes(origin) || origin.startsWith('http://localhost:') || origin.startsWith('capacitor://'))) {
+  const origin = (req.headers.origin as string) || (req.headers.Origin as string) || '';
+
+  if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   } else {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
 
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, x-uploadthing-version, x-uploadthing-package, x-auth-token, x-dev-uid'
-  );
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD');
+
+  const reqHeaders = (req.headers['access-control-request-headers'] as string) || '';
+  if (reqHeaders) {
+    res.setHeader('Access-Control-Allow-Headers', reqHeaders);
+  } else {
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, x-uploadthing-version, x-uploadthing-package, x-uploadthing-fe-package, x-uploadthing-be-adapter, x-auth-token, x-dev-uid, b3, traceparent, baggage, sentry-trace, *'
+    );
+  }
+
   res.setHeader('Access-Control-Max-Age', '86400');
 }
 

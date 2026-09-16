@@ -135,6 +135,9 @@
 
             <span v-if="photoError" class="field-error">{{ photoError }}</span>
 
+            <!-- Temporary Android Upload Diagnostics (Shown only on failure) -->
+            <UploadDebugBanner />
+
             <input
               ref="fileInputRef"
               type="file"
@@ -162,6 +165,7 @@ import { Camera, ImagePlus, MapPin, Trash2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import PostCategoryFields from "../components/PostCategoryFields.vue";
 import CustomDatePicker from "../components/CustomDatePicker.vue";
+import UploadDebugBanner from "../components/UploadDebugBanner.vue";
 import { usePosts } from "../composables/usePosts";
 import { useImageUpload, validateImageFile, MAX_POST_IMAGE_SIZE_BYTES } from "../composables/useImageUpload";
 import type {

@@ -52,10 +52,15 @@ export function handleCors(req: IncomingMessage & { method?: string; headers: an
   }
 
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, x-auth-token, x-dev-uid, x-uploadthing-version, x-uploadthing-fe-package, baggage, sentry-trace'
-  );
+  const requestedHeaders = (req.headers['access-control-request-headers'] as string) || '';
+  if (requestedHeaders) {
+    res.setHeader('Access-Control-Allow-Headers', requestedHeaders);
+  } else {
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, x-auth-token, x-dev-uid, x-uploadthing-version, x-uploadthing-package, x-uploadthing-fe-package, x-uploadthing-be-adapter, b3, traceparent, baggage, sentry-trace, *'
+    );
+  }
 
   if (req.method === 'OPTIONS') {
     if (typeof res.status === 'function') {

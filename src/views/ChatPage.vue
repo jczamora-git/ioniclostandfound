@@ -217,6 +217,9 @@
           </div>
         </div>
 
+        <!-- Temporary Android Upload Diagnostics (Shown only on failure) -->
+        <UploadDebugBanner />
+
         <!-- Sticky Composer with Reply Banner & Image Attachment Support -->
         <ChatComposer
           ref="composerRef"
@@ -275,6 +278,7 @@ import PageHeader from '../components/PageHeader.vue';
 import UserAvatar from '../components/UserAvatar.vue';
 import MessageBubble from '../components/MessageBubble.vue';
 import ChatComposer, { type ReplyContext } from '../components/ChatComposer.vue';
+import UploadDebugBanner from '../components/UploadDebugBanner.vue';
 import { useChat } from '../composables/useChat';
 import { useConversations } from '../composables/useConversations';
 import { useAuth, currentAppUserId, sessionUid } from '../composables/useAuth';
